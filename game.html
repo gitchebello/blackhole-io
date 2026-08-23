@@ -80,8 +80,10 @@ const CFG = {
   ARCO: 34,              // quadros do estouro arco-íris ao crescer
 
   /* trombada entre os dois */
-  COLISAO_ESTRELAS: 10,  // quantas estrelas o menor perde na trombada
-  COLISAO_EMPURRAO: 3.4, // com que força os dois são arremessados
+  COLISAO_ESTRELAS: 5,   // quantas estrelas o menor perde na trombada
+  COLISAO_EMPURRAO: 9,   // com que força os dois são arremessados
+  COLISAO_ATORDOA: 30,   // quadros sem conseguir acelerar depois da pancada
+  COLISAO_ARRASTO: 0.977,// atrito enquanto voam: menor que o normal, vão longe
   COLISAO_ESPERA: 50,    // quadros de carência para não trombar em sequência
   COLISAO_TREMOR: 38,
   COLISAO_ABERR: 44,
@@ -662,11 +664,11 @@ const rnd = semente(CFG.SEMENTE + 4242);
 
 let cena = "menu";                 // "menu" | "jogo"
 const buraco = { x: 0, y: 0, vx: 0, vy: 0, ang: -Math.PI / 2,
-                 nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0 };
+                 nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0, atordoado: 0 };
 
 /* o rival: mesmo bicho, cor azul, cérebro simples */
 const rival = { x: 0, y: 0, vx: 0, vy: 0, ang: 0,
-                nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0,
+                nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0, atordoado: 0,
                 alvo: null, pensar: 0 };
 let vencedor = null;
 let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, esperaTerra = 0, turbo = 0;
@@ -742,7 +744,7 @@ function reiniciar() {
   raioTela = CFG.RAIO_BASE; zoom = zoomAlvo = 1;
   buraco.x = MUNDO.L / 2; buraco.y = MUNDO.A / 2;
   buraco.vx = buraco.vy = 0; buraco.ang = -Math.PI / 2;
-  buraco.pulso = 0; buraco.boca = 0; aneis = [];
+  buraco.pulso = 0; buraco.boca = 0; buraco.atordoado = 0; aneis = [];
   faiscas = []; coracoes = []; tremor = 0; flash = 0; flashLado = 0; aberr = 0;
   arco = 0; turbo = 0; esperaColisao = 0;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO; avisoCadente = 0;
@@ -750,7 +752,7 @@ function reiniciar() {
   for (let i = 0; i < alvoEstrelas(); i++) estrelas.push(novaEstrela(buraco));
   rival.nivel = 0; rival.comidas = 0; rival.progresso = 0;
   rival.vx = rival.vy = 0; rival.ang = Math.PI / 2;
-  rival.pulso = 0; rival.boca = 0; rival.alvo = null; rival.pensar = 0;
+  rival.pulso = 0; rival.boca = 0; rival.atordoado = 0; rival.alvo = null; rival.pensar = 0;
   const L0 = limites();
   rival.x = limitar(buraco.x + visaoL() * 0.42, L0.x0 + 20, L0.x1 - 20);
   rival.y = limitar(buraco.y + visaoA() * 0.28, L0.y0 + 20, L0.y1 - 20);
@@ -842,12 +844,15 @@ function passoRival(L) {
     rival.ang = Math.atan2(dy, dx) + (Math.random() - 0.5) * CFG.RIVAL_MIRA;
   }
 
-  const acel = CFG.ACEL * CFG.RIVAL_FORCA / zr;
-  rival.vx = (rival.vx + Math.cos(rival.ang) * acel) * CFG.ATRITO;
-  rival.vy = (rival.vy + Math.sin(rival.ang) * acel) * CFG.ATRITO;
+  const zonzo = rival.atordoado > 0;
+  if (zonzo) rival.atordoado--;
+  const acel = (zonzo ? 0 : CFG.ACEL * CFG.RIVAL_FORCA) / zr;
+  const atrito = zonzo ? CFG.COLISAO_ARRASTO : CFG.ATRITO;
+  rival.vx = (rival.vx + Math.cos(rival.ang) * acel) * atrito;
+  rival.vy = (rival.vy + Math.sin(rival.ang) * acel) * atrito;
   const vm = Math.max(0.9, CFG.VEL_MAX - rival.nivel * CFG.VEL_PERDA) * CFG.RIVAL_FORCA / zr;
   const v = Math.hypot(rival.vx, rival.vy);
-  if (v > vm) { rival.vx = rival.vx / v * vm; rival.vy = rival.vy / v * vm; }
+  if (!zonzo && v > vm) { rival.vx = rival.vx / v * vm; rival.vy = rival.vy / v * vm; }
   rival.x += rival.vx; rival.y += rival.vy;
 
   const m = rm + 1;
@@ -876,7 +881,9 @@ function trombada(ux, uy) {
   const emp = CFG.COLISAO_EMPURRAO / zoom;
   buraco.vx = -ux * emp; buraco.vy = -uy * emp;
   rival.vx  =  ux * emp; rival.vy  =  uy * emp;
+  buraco.atordoado = rival.atordoado = CFG.COLISAO_ATORDOA;
   buraco.pulso = 1; rival.pulso = 1;
+  rival.alvo = null;                     // ele reavalia depois de levar o tranco
 
   tremor = CFG.COLISAO_TREMOR;
   aberr = CFG.COLISAO_ABERR;
@@ -898,7 +905,8 @@ function estrelaSolta(de, k, total) {
   const L = limites();
   const e = novaEstrela(null);
   const a = (k / total) * Math.PI * 2 + Math.random() * 0.5;
-  const raio = raioMundoNivel(de.nivel) + 8 + Math.random() * 26;
+  // caem além do alcance de sucção dele: senão o perdedor reabsorve na hora
+  const raio = raioMundoNivel(de.nivel) * CFG.ALCANCE_SUCCAO * (1.1 + Math.random() * 0.55);
   e.x = limitar(de.x + Math.cos(a) * raio, L.x0 + 4, L.x1 - 4);
   e.y = limitar(de.y + Math.sin(a) * raio, L.y0 + 4, L.y1 - 4);
   const v = (0.5 + Math.random() * 1.1) / zoom;
@@ -992,12 +1000,17 @@ function passo() {
 
   /* — movimento: tudo é pensado em pixels de tela e convertido pelo zoom,
        para a sensação de velocidade não mudar quando a câmera se afasta — */
+  // depois da pancada ele fica um tempo sem comando e sem teto de velocidade:
+  // é o que faz os dois realmente se afastarem, em vez de grudarem de novo
+  const zonzo = buraco.atordoado > 0;
+  if (zonzo) { buraco.atordoado--; acelerando = false; }
   const fator = turbo > 0 ? CFG.TERRA_FATOR : 1;
   const acel = (acelerando ? CFG.ACEL * fator : 0) / zoom;
-  buraco.vx = (buraco.vx + Math.cos(buraco.ang) * acel) * CFG.ATRITO;
-  buraco.vy = (buraco.vy + Math.sin(buraco.ang) * acel) * CFG.ATRITO;
+  const atrito = zonzo ? CFG.COLISAO_ARRASTO : CFG.ATRITO;
+  buraco.vx = (buraco.vx + Math.cos(buraco.ang) * acel) * atrito;
+  buraco.vy = (buraco.vy + Math.sin(buraco.ang) * acel) * atrito;
   const v = Math.hypot(buraco.vx, buraco.vy), vm = velMaxTela() / zoom;
-  if (v > vm) { buraco.vx = buraco.vx / v * vm; buraco.vy = buraco.vy / v * vm; }
+  if (!zonzo && v > vm) { buraco.vx = buraco.vx / v * vm; buraco.vy = buraco.vy / v * vm; }
   buraco.x += buraco.vx; buraco.y += buraco.vy;
   if (turbo > 0) turbo--;
 
@@ -1592,9 +1605,6 @@ function desenharMenu() {
   texto("JOGAR", b.x + Math.round((b.l - larguraTexto("JOGAR", 2)) / 2),
         b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
 
-  const base = b.y + b.a + 20;
-  textoCentro("segure e arraste para mover", base, COR.hudFraco, 1);
-  textoCentro("devore a Terra e ganhe turbo", base + 14, COR.turbo, 1);
 }
 
 function desenharAnalogico() {
