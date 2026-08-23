@@ -76,6 +76,9 @@ const CFG = {
   /* efeito da Terra */
   TERRA_CLARAO: 30,      // duração do flash azul ao devorá-la
 
+  ABERRACAO: 26,         // quadros de aberração cromática ao crescer
+  ABERRACAO_MAX: 2,      // deslocamento máximo dos canais, em pixels
+
   /* controle */
   ZONA_MORTA: 4,
   RAIO_ANALOG: 22,
@@ -620,7 +623,7 @@ const rival = { x: 0, y: 0, vx: 0, vy: 0, ang: 0,
                 alvo: null, pensar: 0 };
 let vencedor = null;
 let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, esperaTerra = 0, turbo = 0;
-let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, quadro = 0;
+let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, quadro = 0;
 let zoom = 1, zoomAlvo = 1, raioTela = CFG.RAIO_BASE;
 const cam = { x: 0, y: 0 };
 
@@ -692,7 +695,7 @@ function reiniciar() {
   buraco.x = MUNDO.L / 2; buraco.y = MUNDO.A / 2;
   buraco.vx = buraco.vy = 0; buraco.ang = -Math.PI / 2;
   buraco.pulso = 0; buraco.boca = 0; aneis = [];
-  faiscas = []; coracoes = []; tremor = 0; flash = 0; flashLado = 0; turbo = 0;
+  faiscas = []; coracoes = []; tremor = 0; flash = 0; flashLado = 0; aberr = 0; turbo = 0;
   estrelas = [];
   for (let i = 0; i < alvoEstrelas(); i++) estrelas.push(novaEstrela(buraco));
   rival.nivel = 0; rival.comidas = 0; rival.progresso = 0;
@@ -974,9 +977,10 @@ function passoParticulas() {
   if (flashTerra > 0) flashTerra--;
   if (turbo > 0) { raiarTurbo(); if (quadro % 2 === 0) raiarTurbo(); }
 
-  if (tremor > 0) tremor *= 0.88;
+  if (tremor > 0) tremor *= 0.9;
   if (flash > 0) flash--;
   if (flashLado > 0) flashLado--;
+  if (aberr > 0) aberr--;
 }
 
 /* raios azuis e dourados saindo de dentro do personagem enquanto o turbo dura */
@@ -1026,7 +1030,7 @@ function engolirEstrela(indice, dono) {
     dono.progresso = 0;
     dono.nivel++;
     if (dono === buraco) {
-      tremor = 12; flash = 30; flashLado = 36;
+      tremor = 22; flash = 30; flashLado = 36; aberr = CFG.ABERRACAO;
       soltarCoracoes(buraco.x, buraco.y, 34, 2.1, 1);   // chuva de corações
     } else {
       soltarCoracoes(rival.x, rival.y, 8, 1.2, 0);
@@ -1342,17 +1346,12 @@ function desenharMenu() {
   ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
 
-  /* logo: "blackhole" grande, ".io" pendurado no canto inferior direito */
-  const topo = Math.round(VA * 0.19);
-  const tamNome = larguraTexto("blackhole", 3) <= VL - 24 ? 3 : 2;
-  const ln = larguraTexto("blackhole", tamNome);
-  const ls = larguraTexto(".io", 2);
-  const x0 = Math.round((VL - ln) / 2);
-  texto("blackhole", x0, topo, COR.hud, tamNome);
-  texto(".io", x0 + ln - ls, topo + FONTE_H * tamNome - 2, COR.disco[4], 2);
-
-  textoCentro("engula as estrelas e cresca",
-              topo + FONTE_H * tamNome + 16, COR.hudFraco, 1);
+  /* logo */
+  const topo = Math.round(VA * 0.2);
+  const tamNome = larguraTexto("blackhole", 3) <= VL - 20 ? 3 : 2;
+  textoCentro("blackhole", topo, COR.hud, tamNome);
+  textoCentro("devoradores de estrelas",
+              topo + FONTE_H * tamNome + 6, COR.disco[4], 1);
 
   const b = botaoJogar();
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
@@ -1378,6 +1377,41 @@ function desenharAnalogico() {
   ctx.globalAlpha = 1;
 }
 
+/* Aberração cromática: separa o vermelho do ciano e desloca um para cada
+   lado. Feito com composição de canvas (multiply para isolar o canal,
+   lighter para somar de volta) em vez de mexer pixel a pixel — assim continua
+   rodando na placa de vídeo e não trava o quadro. */
+const bufR = document.createElement("canvas");
+const bufC = document.createElement("canvas");
+
+function aberracao() {
+  if (aberr <= 0) return;
+  const forca = aberr / CFG.ABERRACAO;
+  const d = Math.max(1, Math.round(forca * CFG.ABERRACAO_MAX));
+  if (bufR.width !== VL || bufR.height !== VA) {
+    bufR.width = bufC.width = VL;
+    bufR.height = bufC.height = VA;
+  }
+  const rx = bufR.getContext("2d"), cx = bufC.getContext("2d");
+
+  rx.globalCompositeOperation = "source-over";
+  rx.clearRect(0, 0, VL, VA); rx.drawImage(tela, 0, 0);
+  rx.globalCompositeOperation = "multiply";
+  rx.fillStyle = "#ff0000"; rx.fillRect(0, 0, VL, VA);   // sobra só o vermelho
+
+  cx.globalCompositeOperation = "source-over";
+  cx.clearRect(0, 0, VL, VA); cx.drawImage(tela, 0, 0);
+  cx.globalCompositeOperation = "multiply";
+  cx.fillStyle = "#00ffff"; cx.fillRect(0, 0, VL, VA);   // sobra verde e azul
+
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, VL, VA);
+  ctx.globalCompositeOperation = "lighter";              // soma os canais de volta
+  ctx.drawImage(bufR, d, 0);
+  ctx.drawImage(bufC, -d, 0);
+  ctx.globalCompositeOperation = "source-over";
+}
+
 function desenhar() {
   desenharMundo();
   desenharClaraoTerra();
@@ -1385,6 +1419,7 @@ function desenhar() {
   if (cena === "menu") desenharMenu();
   else if (cena === "fim") desenharFim();
   else { desenharHUD(); desenharAnalogico(); }
+  aberracao();
 }
 
 /* ── laço principal ──────────────────────────────────────────── */
