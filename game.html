@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#05030f">
-<title>Buraco Negro</title>
+<title>blackhole.io</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body {
@@ -23,7 +23,7 @@
 "use strict";
 
 /* ══════════════════════════════════════════════════════════════
-   BURACO NEGRO — protótipo 02
+   blackhole.io — protótipo 03
    Nebulosa criadora de estrelas. Engula estrelas para crescer.
    O universo se expande junto com você: quanto maior o buraco,
    mais longe a câmera fica e mais mapa aparece.
@@ -63,6 +63,8 @@ const CFG = {
   TERRA_TURBO: 600,      // duração do turbo (600 = 10s)
   TERRA_FATOR: 1.5,      // multiplicador de velocidade do turbo
 
+  NEBULOSAS: 7,          // nuvens de gás espalhadas pelo mapa; o resto é vácuo
+
   /* controle */
   ZONA_MORTA: 4,
   RAIO_ANALOG: 22,
@@ -72,9 +74,11 @@ const CFG = {
 /* ── paleta ──────────────────────────────────────────────────── */
 const COR = {
   vazio:  "#05030f",
-  neb:  ["#0b0620","#150a31","#22104a","#331868","#4d2490",
-         "#06181f","#092833","#0e3c49","#145a66","#1c8590"],
-  poeira:["#1b1436","#281d4c","#352763"],
+  nebs: [["#2b1206","#4d2209","#7a3a12","#a85a22"],   // laranja
+         ["#061a30","#0a2b52","#0f4278","#1761a6"],   // azul
+         ["#180a2c","#28104a","#3d1a70","#5b28a0"],   // roxo
+         ["#06200f","#0a3519","#0f5029","#16763c"]],  // verde
+  poeira:["#171233","#221a44","#2e2458"],
   estrela:["#6b5fb0","#b4a6f5","#e8e2ff","#ffffff"],
   disco: ["#2a0d3f","#5c1a6b","#a32b74","#e2543f","#ff9a3c","#ffd166","#fff3c4","#ffffff"],
   halo:   "#3b1a6b",
@@ -86,30 +90,96 @@ const COR = {
   painel: "#0a0618"
 };
 
-/* ── fonte pixel 3x5 ─────────────────────────────────────────── */
+/* ── fonte pixel 5x7 (a 8a linha guarda as descidas de g, j, p, q, y) ── */
+const FONTE_H = 8;
 const FONTE = {
-  "0":"###,#.#,#.#,#.#,###", "1":".#.,##.,.#.,.#.,###",
-  "2":"###,..#,###,#..,###", "3":"###,..#,.##,..#,###",
-  "4":"#.#,#.#,###,..#,..#", "5":"###,#..,###,..#,###",
-  "6":"###,#..,###,#.#,###", "7":"###,..#,..#,..#,..#",
-  "8":"###,#.#,###,#.#,###", "9":"###,#.#,###,..#,###",
-  "A":".#.,#.#,###,#.#,#.#", "B":"##.,#.#,##.,#.#,##.",
-  "C":".##,#..,#..,#..,.##", "D":"##.,#.#,#.#,#.#,##.",
-  "E":"###,#..,##.,#..,###", "F":"###,#..,##.,#..,#..",
-  "G":".##,#..,#.#,#.#,.##", "H":"#.#,#.#,###,#.#,#.#",
-  "I":"###,.#.,.#.,.#.,###", "J":"..#,..#,..#,#.#,.#.",
-  "K":"#.#,#.#,##.,#.#,#.#", "L":"#..,#..,#..,#..,###",
-  "M":"#.#,###,###,#.#,#.#", "N":"#.#,###,###,###,#.#",
-  "O":".#.,#.#,#.#,#.#,.#.", "P":"##.,#.#,##.,#..,#..",
-  "Q":".#.,#.#,#.#,##.,.##", "R":"##.,#.#,##.,#.#,#.#",
-  "S":".##,#..,.#.,..#,##.", "T":"###,.#.,.#.,.#.,.#.",
-  "U":"#.#,#.#,#.#,#.#,###", "V":"#.#,#.#,#.#,#.#,.#.",
-  "W":"#.#,#.#,###,###,#.#", "X":"#.#,#.#,.#.,#.#,#.#",
-  "Y":"#.#,#.#,.#.,.#.,.#.", "Z":"###,..#,.#.,#..,###",
-  ":":"...,.#.,...,.#.,...", ".":"...,...,...,...,.#.",
-  "/":"..#,..#,.#.,#..,#..", "-":"...,...,###,...,...",
-  "!":".#.,.#.,.#.,...,.#.", " ":"...,...,...,...,..."
+"A":[".###.","#...#","#...#","#####","#...#","#...#","#...#","....."],
+"B":["####.","#...#","#...#","####.","#...#","#...#","####.","....."],
+"C":[".###.","#...#","#....","#....","#....","#...#",".###.","....."],
+"D":["####.","#...#","#...#","#...#","#...#","#...#","####.","....."],
+"E":["#####","#....","#....","####.","#....","#....","#####","....."],
+"F":["#####","#....","#....","####.","#....","#....","#....","....."],
+"G":[".###.","#...#","#....","#.###","#...#","#...#",".###.","....."],
+"H":["#...#","#...#","#...#","#####","#...#","#...#","#...#","....."],
+"I":["#####","..#..","..#..","..#..","..#..","..#..","#####","....."],
+"J":["..###","...#.","...#.","...#.","...#.","#..#.",".##..","....."],
+"K":["#...#","#..#.","#.#..","##...","#.#..","#..#.","#...#","....."],
+"L":["#....","#....","#....","#....","#....","#....","#####","....."],
+"M":["#...#","##.##","#.#.#","#.#.#","#...#","#...#","#...#","....."],
+"N":["#...#","##..#","#.#.#","#.#.#","#..##","#...#","#...#","....."],
+"O":[".###.","#...#","#...#","#...#","#...#","#...#",".###.","....."],
+"P":["####.","#...#","#...#","####.","#....","#....","#....","....."],
+"Q":[".###.","#...#","#...#","#...#","#.#.#","#..#.",".##.#","....."],
+"R":["####.","#...#","#...#","####.","#.#..","#..#.","#...#","....."],
+"S":[".####","#....","#....",".###.","....#","....#","####.","....."],
+"T":["#####","..#..","..#..","..#..","..#..","..#..","..#..","....."],
+"U":["#...#","#...#","#...#","#...#","#...#","#...#",".###.","....."],
+"V":["#...#","#...#","#...#","#...#","#...#",".#.#.","..#..","....."],
+"W":["#...#","#...#","#...#","#.#.#","#.#.#","##.##","#...#","....."],
+"X":["#...#","#...#",".#.#.","..#..",".#.#.","#...#","#...#","....."],
+"Y":["#...#","#...#",".#.#.","..#..","..#..","..#..","..#..","....."],
+"Z":["#####","....#","...#.","..#..",".#...","#....","#####","....."],
+"a":[".....",".....",".###.","....#",".####","#...#",".####","....."],
+"b":["#....","#....","####.","#...#","#...#","#...#","####.","....."],
+"c":[".....",".....",".####","#....","#....","#....",".####","....."],
+"d":["....#","....#",".####","#...#","#...#","#...#",".####","....."],
+"e":[".....",".....",".###.","#...#","#####","#....",".###.","....."],
+"f":["..##.",".#..#",".#...","####.",".#...",".#...",".#...","....."],
+"g":[".....",".....",".####","#...#","#...#",".####","....#",".###."],
+"h":["#....","#....","####.","#...#","#...#","#...#","#...#","....."],
+"i":["..#..",".....",".##..","..#..","..#..","..#..",".###.","....."],
+"j":["...#.",".....","..##.","...#.","...#.","...#.","#..#.",".##.."],
+"k":["#....","#....","#..#.","#.#..","##...","#.#..","#..#.","....."],
+"l":[".##..","..#..","..#..","..#..","..#..","..#..",".###.","....."],
+"m":[".....",".....","##.#.","#.#.#","#.#.#","#.#.#","#...#","....."],
+"n":[".....",".....","####.","#...#","#...#","#...#","#...#","....."],
+"o":[".....",".....",".###.","#...#","#...#","#...#",".###.","....."],
+"p":[".....",".....","####.","#...#","#...#","####.","#....","#...."],
+"q":[".....",".....",".####","#...#","#...#",".####","....#","....#"],
+"r":[".....",".....","#.##.","##..#","#....","#....","#....","....."],
+"s":[".....",".....",".####","#....",".###.","....#","####.","....."],
+"t":[".#...",".#...","####.",".#...",".#...",".#..#","..##.","....."],
+"u":[".....",".....","#...#","#...#","#...#","#..##",".##.#","....."],
+"v":[".....",".....","#...#","#...#","#...#",".#.#.","..#..","....."],
+"w":[".....",".....","#...#","#.#.#","#.#.#","#.#.#",".#.#.","....."],
+"x":[".....",".....","#...#",".#.#.","..#..",".#.#.","#...#","....."],
+"y":[".....",".....","#...#","#...#","#...#",".####","....#",".###."],
+"z":[".....",".....","#####","...#.","..#..",".#...","#####","....."],
+"0":[".###.","#...#","#..##","#.#.#","##..#","#...#",".###.","....."],
+"1":["..#..",".##..","..#..","..#..","..#..","..#..",".###.","....."],
+"2":[".###.","#...#","....#","...#.","..#..",".#...","#####","....."],
+"3":["#####","...#.","..#..","...#.","....#","#...#",".###.","....."],
+"4":["...#.","..##.",".#.#.","#..#.","#####","...#.","...#.","....."],
+"5":["#####","#....","####.","....#","....#","#...#",".###.","....."],
+"6":["..##.",".#...","#....","####.","#...#","#...#",".###.","....."],
+"7":["#####","....#","...#.","..#..",".#...",".#...",".#...","....."],
+"8":[".###.","#...#","#...#",".###.","#...#","#...#",".###.","....."],
+"9":[".###.","#...#","#...#",".####","....#","...#.",".##..","....."],
+".":[".....",".....",".....",".....",".....",".....","..#..","....."],
+",":[".....",".....",".....",".....",".....","..#..","..#..",".#..."],
+":":[".....",".....","..#..",".....",".....","..#..",".....","....."],
+"/":["....#","....#","...#.","..#..",".#...","#....","#....","....."],
+"-":[".....",".....",".....",".###.",".....",".....",".....","....."],
+"+":[".....","..#..","..#..","#####","..#..","..#..",".....","....."],
+"!":["..#..","..#..","..#..","..#..","..#..",".....","..#..","....."],
+"?":[".###.","#...#","....#","..##.","..#..",".....","..#..","....."],
+" ":[".....",".....",".....",".....",".....",".....",".....","....."]
 };
+
+/* cada glifo guarda onde começa e quanto ocupa: o texto sai proporcional,
+   e não com o espaçamento de máquina de escrever */
+const GLIFOS = {};
+for (const ch in FONTE) {
+  const linhas = FONTE[ch];
+  let c0 = 99, c1 = -1;
+  for (let y = 0; y < FONTE_H; y++)
+    for (let x = 0; x < 5; x++)
+      if (linhas[y][x] === "#") { if (x < c0) c0 = x; if (x > c1) c1 = x; }
+  if (c1 < 0) { c0 = 0; c1 = 1; }                 // o espaço tem 2 de largura
+  GLIFOS[ch] = { linhas: linhas, c0: c0, larg: c1 - c0 + 1 };
+}
+const VAO = 1;                                     // vão entre letras
+const glifo = ch => GLIFOS[ch] || GLIFOS[ch.toUpperCase()] || GLIFOS[" "];
 
 /* ── utilidades ──────────────────────────────────────────────── */
 function semente(a) {
@@ -179,44 +249,104 @@ fundo.width = MUNDO.L; fundo.height = MUNDO.A;
 // que é como a pixel art faz degradê sem inventar cor nova
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
+/* Sorteia algumas nuvens espalhadas, de cores alternadas. Fora delas
+   o espaço é preto de verdade — é o vácuo que faz o gás ter valor. */
+function sortearNebulosas() {
+  const r = semente(CFG.SEMENTE + 17);
+  const lista = [];
+  const raioBase = Math.min(MUNDO.L, MUNDO.A) * 0.105;   // pequenas perto de uma tela
+  for (let tent = 0; tent < 500 && lista.length < CFG.NEBULOSAS; tent++) {
+    const n = {
+      x: MUNDO.L * (0.12 + r() * 0.76),
+      y: MUNDO.A * (0.10 + r() * 0.80),
+      rx: raioBase * (0.6 + r() * 0.9),
+      ry: raioBase * (0.6 + r() * 0.9),
+      ang: r() * Math.PI,
+      esc: 1 / (13 + r() * 11),      // gás mais fibroso, menos borrão
+      s: Math.floor(r() * 90000),
+      pal: 0                                   // definida depois, olhando os vizinhos
+    };
+    let cabe = true;
+    for (const o of lista)
+      if (Math.hypot(o.x - n.x, o.y - n.y) < (o.rx + n.rx) * 1.15) cabe = false;
+    if (cabe) lista.push(n);
+  }
+  // nenhuma nuvem repete a cor da vizinha mais próxima
+  for (let i = 0; i < lista.length; i++) {
+    if (i === 0) { lista[i].pal = Math.floor(r() * COR.nebs.length); continue; }
+    let perto = 0, dm = Infinity;
+    for (let j = 0; j < i; j++) {
+      const d = Math.hypot(lista[j].x - lista[i].x, lista[j].y - lista[i].y);
+      if (d < dm) { dm = d; perto = j; }
+    }
+    lista[i].pal = (lista[perto].pal + 1 + Math.floor(r() * (COR.nebs.length - 1))) % COR.nebs.length;
+  }
+  return lista;
+}
+const NEBULOSAS = sortearNebulosas();
+
 function pintarNebulosa() {
   const fx = fundo.getContext("2d");
   const img = fx.createImageData(MUNDO.L, MUNDO.A);
   const d = img.data;
   const rgb = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
-  const paleta = COR.neb.map(rgb);
+  const paletas = COR.nebs.map(p => p.map(rgb));
   const vazio = rgb(COR.vazio);
-  const QUENTE = 0, FRIO = 5, DEGRAUS = 5;
-  const esc = 1 / 46;
-  const LIMIAR = 0.55;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = vazio[0]; d[i+1] = vazio[1]; d[i+2] = vazio[2]; d[i+3] = 255;
+  }
 
-  // o ruído é calculado a cada bloco de 2x2 (rápido, e deixa a nuvem
-  // mais chapada — combina com pixel art); o pontilhado continua por pixel
-  for (let by = 0; by < MUNDO.A; by += 2) {
-    for (let bx = 0; bx < MUNDO.L; bx += 2) {
-      const roxo  = fractal(bx * esc, by * esc, CFG.SEMENTE, 5);
-      const ciano = fractal(bx * esc * 1.25 + 60, by * esc * 1.25 - 35, CFG.SEMENTE + 777, 5);
-      const mescla = fractal(bx * esc * 0.35, by * esc * 0.35, CFG.SEMENTE + 313, 2);
-      const peso = limitar((mescla - 0.42) * 3.0, 0, 1);
-      const densidade = misturar(roxo, ciano, peso);
-      const temGas = densidade > LIMIAR;
-      const t = temGas ? (densidade - LIMIAR) / (1 - LIMIAR) : 0;
-      const escalaTom = Math.pow(t, 0.65) * (DEGRAUS - 1);
-      const base = Math.floor(escalaTom);
-      const frac = escalaTom - base;
-      const familia = (peso > 0.5 ? FRIO : QUENTE);
+  /* densidade calculada em blocos de 2x2 (rápido, e deixa a nuvem mais
+     chapada, que combina com pixel art); guarda a nuvem mais forte */
+  const BL = Math.ceil(MUNDO.L / 2), BA = Math.ceil(MUNDO.A / 2);
+  const forca = new Float32Array(BL * BA);
+  const dono  = new Uint8Array(BL * BA);
 
+  for (const n of NEBULOSAS) {
+    const cos = Math.cos(n.ang), sin = Math.sin(n.ang);
+    const R = Math.max(n.rx, n.ry);
+    const bx0 = Math.max(0, Math.floor((n.x - R) / 2));
+    const bx1 = Math.min(BL - 1, Math.ceil((n.x + R) / 2));
+    const by0 = Math.max(0, Math.floor((n.y - R) / 2));
+    const by1 = Math.min(BA - 1, Math.ceil((n.y + R) / 2));
+    for (let by = by0; by <= by1; by++) {
+      for (let bx = bx0; bx <= bx1; bx++) {
+        const x = bx * 2, y = by * 2;
+        const dx = x - n.x, dy = y - n.y;
+        const lx = (dx * cos + dy * sin) / n.rx;      // elipse girada
+        const ly = (-dx * sin + dy * cos) / n.ry;
+        const dd = lx * lx + ly * ly;
+        if (dd >= 1) continue;
+        const queda = 1 - dd;                          // some suavemente na borda
+        const nuvem = fractal(x * n.esc, y * n.esc, n.s, 5);
+        let v = queda * (nuvem * 1.8 - 0.66);      // corta o miolo fraco: sobra fibra
+        if (v <= 0) continue;
+        v = Math.pow(v, 1.7);                          // afina: sobra mais vácuo
+        const i = by * BL + bx;
+        if (v > forca[i]) { forca[i] = v; dono[i] = n.pal; }
+      }
+    }
+  }
+
+  const DEGRAUS = 4;
+  for (let by = 0; by < BA; by++) {
+    for (let bx = 0; bx < BL; bx++) {
+      const i = by * BL + bx;
+      const v = forca[i];
+      if (v <= 0) continue;
+      const paleta = paletas[dono[i]];
+      const tom = Math.min(1, v * 2.8) * DEGRAUS;      // 0..4
+      const base = Math.floor(tom), frac = tom - base;
       for (let oy = 0; oy < 2; oy++) {
-        const y = by + oy; if (y >= MUNDO.A) break;
+        const y = by * 2 + oy; if (y >= MUNDO.A) break;
         for (let ox = 0; ox < 2; ox++) {
-          const x = bx + ox; if (x >= MUNDO.L) break;
-          let cor = vazio;
-          if (temGas) {
-            const lim = BAYER[(x & 3) + (y & 3) * 4] / 16;
-            cor = paleta[familia + Math.min(DEGRAUS - 1, base + (frac > lim ? 1 : 0))];
-          }
-          const i = (y * MUNDO.L + x) * 4;
-          d[i] = cor[0]; d[i+1] = cor[1]; d[i+2] = cor[2]; d[i+3] = 255;
+          const x = bx * 2 + ox; if (x >= MUNDO.L) break;
+          const lim = (BAYER[(x & 3) + (y & 3) * 4] + embaralha(x, y, 31) * 5 - 2.5) / 16;
+          const passo = base + (frac > lim ? 1 : 0);
+          if (passo <= 0) continue;                    // franja pontilhada: vira vácuo
+          const cor = paleta[Math.min(DEGRAUS - 1, passo - 1)];
+          const j = (y * MUNDO.L + x) * 4;
+          d[j] = cor[0]; d[j+1] = cor[1]; d[j+2] = cor[2];
         }
       }
     }
@@ -225,12 +355,12 @@ function pintarNebulosa() {
 
   // poeira estelar: pontinhos fixos que dão profundidade (não são comestíveis)
   const r = semente(CFG.SEMENTE + 99);
-  const pontos = Math.round(MUNDO.L * MUNDO.A / 900);
+  const pontos = Math.round(MUNDO.L * MUNDO.A / 1100);
   for (let i = 0; i < pontos; i++) {
     fx.fillStyle = COR.poeira[Math.floor(r() * COR.poeira.length)];
     fx.fillRect(Math.floor(r() * MUNDO.L), Math.floor(r() * MUNDO.A), 1, 1);
   }
-  for (let i = 0; i < pontos / 8; i++) {
+  for (let i = 0; i < pontos / 9; i++) {
     fx.fillStyle = COR.estrela[0];
     fx.fillRect(Math.floor(r() * MUNDO.L), Math.floor(r() * MUNDO.A), 1, 1);
   }
@@ -302,15 +432,16 @@ function px(x, y, cor) {
 }
 function desenhaGlifos(str, x, y, cor, tam) {
   ctx.fillStyle = cor;
-  let cx = Math.round(x);
-  for (const ch of str.toUpperCase()) {
-    const g = FONTE[ch] || FONTE[" "];
-    const linhas = g.split(",");
-    for (let ly = 0; ly < 5; ly++)
-      for (let lx = 0; lx < 3; lx++)
-        if (linhas[ly][lx] === "#")
-          ctx.fillRect(cx + lx * tam, Math.round(y) + ly * tam, tam, tam);
-    cx += 4 * tam;
+  let cx = Math.round(x), cy = Math.round(y);
+  for (const ch of str) {
+    const g = glifo(ch);
+    for (let ly = 0; ly < FONTE_H; ly++) {
+      const linha = g.linhas[ly];
+      for (let lx = 0; lx < g.larg; lx++)
+        if (linha[g.c0 + lx] === "#")
+          ctx.fillRect(cx + lx * tam, cy + ly * tam, tam, tam);
+    }
+    cx += (g.larg + VAO) * tam;
   }
 }
 function texto(str, x, y, cor, tam) {           // com sombra: legível sobre o gás
@@ -318,7 +449,12 @@ function texto(str, x, y, cor, tam) {           // com sombra: legível sobre o 
   desenhaGlifos(str, x + tam, y + tam, "#05030f", tam);
   desenhaGlifos(str, x, y, cor, tam);
 }
-const larguraTexto = (str, tam) => str.length * 4 * (tam || 1) - (tam || 1);
+function larguraTexto(str, tam) {
+  tam = tam || 1;
+  let l = 0;
+  for (const ch of str) l += (glifo(ch).larg + VAO) * tam;
+  return Math.max(0, l - VAO * tam);
+}
 function textoCentro(str, y, cor, tam) {
   texto(str, Math.round((VL - larguraTexto(str, tam || 1)) / 2), y, cor, tam);
 }
@@ -482,9 +618,8 @@ function passo() {
   /* — direção — */
   let acelerando = false;
   if (cena === "menu") {
-    // modo demonstração: ele vagueia sozinho atrás do menu
-    buraco.ang = quadro * 0.006;
-    acelerando = true;
+    // no menu ele fica parado, esperando: só o disco de acreção gira
+    buraco.vx = buraco.vy = 0;
   } else {
     if (toque.ativo) {
       const dx = toque.x - toque.ax, dy = toque.y - toque.ay;
@@ -737,20 +872,20 @@ function desenharBuraco() {
 
 function desenharHUD() {
   texto("ESTRELAS " + comidas, 5, 5, COR.hud, 1);
-  texto("NIVEL " + buraco.nivel + "/" + CFG.NIVEL_MAX, 5, 12, COR.hudFraco, 1);
+  texto("NIVEL " + buraco.nivel + "/" + CFG.NIVEL_MAX, 5, 15, COR.hudFraco, 1);
 
   /* barra do próximo nível */
   const larg = 40, x0 = VL - 20 - larg;
   if (noMaximo()) {
     const t = "TAMANHO MAXIMO";
-    texto(t, VL - 20 - larguraTexto(t, 1), 11, COR.aviso, 1);
+    texto(t, VL - 20 - larguraTexto(t, 1), 15, COR.aviso, 1);
   } else {
     const custo = custoDoNivel(buraco.nivel);
-    ctx.fillStyle = COR.borda; ctx.fillRect(x0, 5, larg, 3);
+    ctx.fillStyle = COR.borda; ctx.fillRect(x0, 6, larg, 3);
     ctx.fillStyle = COR.disco[5];
-    ctx.fillRect(x0, 5, Math.round(progresso / custo * larg), 3);
-    const t = (custo - progresso) + " P/ CRESCER";
-    texto(t, VL - 20 - larguraTexto(t, 1), 11, COR.hudFraco, 1);
+    ctx.fillRect(x0, 6, Math.round(progresso / custo * larg), 3);
+    const t = (custo - progresso) + " p/ crescer";
+    texto(t, VL - 20 - larguraTexto(t, 1), 13, COR.hudFraco, 1);
   }
 
   /* turbo da Terra */
@@ -759,7 +894,7 @@ function desenharHUD() {
     texto(t, Math.round((VL - larguraTexto(t, 1)) / 2), 5, COR.turbo, 1);
     ctx.fillStyle = COR.turbo;
     const larguraT = Math.round(turbo / CFG.TERRA_TURBO * 40);
-    ctx.fillRect(Math.round((VL - 40) / 2), 12, larguraT, 2);
+    ctx.fillRect(Math.round((VL - 40) / 2), 15, larguraT, 2);
   }
 
   if (flash > 0) textoCentro("CRESCEU!", Math.round(VA * 0.28), COR.aviso, 2);
@@ -767,29 +902,36 @@ function desenharHUD() {
   /* botão de sair */
   const b = botaoSair();
   caixa(b, COR.painel, COR.hudFraco);
-  texto("X", b.x + 5, b.y + 4, COR.hud, 1);
+  texto("X", b.x + Math.round((b.l - larguraTexto("X", 1)) / 2), b.y + 3, COR.hud, 1);
 }
 
 function desenharMenu() {
-  ctx.globalAlpha = 0.62;
+  ctx.globalAlpha = 0.5;
   ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
 
-  const topo = Math.round(VA * 0.22);
-  textoCentro("BURACO", topo, COR.hud, 3);
-  textoCentro("NEGRO", topo + 22, COR.hud, 3);
-  textoCentro("ENGULA AS ESTRELAS E CRESCA", topo + 50, COR.hudFraco, 1);
+  /* logo: "blackhole" grande, ".io" pendurado no canto inferior direito */
+  const topo = Math.round(VA * 0.19);
+  const tamNome = larguraTexto("blackhole", 3) <= VL - 24 ? 3 : 2;
+  const ln = larguraTexto("blackhole", tamNome);
+  const ls = larguraTexto(".io", 2);
+  const x0 = Math.round((VL - ln) / 2);
+  texto("blackhole", x0, topo, COR.hud, tamNome);
+  texto(".io", x0 + ln - ls, topo + FONTE_H * tamNome - 2, COR.disco[4], 2);
+
+  textoCentro("engula as estrelas e cresca",
+              topo + FONTE_H * tamNome + 16, COR.hudFraco, 1);
 
   const b = botaoJogar();
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
   caixa(b, COR.painel, pulso > 0.5 ? COR.disco[5] : COR.disco[4]);
   texto("JOGAR", b.x + Math.round((b.l - larguraTexto("JOGAR", 2)) / 2),
-        b.y + Math.round((b.a - 10) / 2), COR.hud, 2);
+        b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
 
-  const base = b.y + b.a + 16;
-  textoCentro("SEGURE A TELA PARA ACELERAR", base, COR.hudFraco, 1);
-  textoCentro("ARRASTE PARA VIRAR", base + 8, COR.hudFraco, 1);
-  textoCentro("DEVORE A TERRA PARA GANHAR TURBO", base + 20, COR.turbo, 1);
+  const base = b.y + b.a + 18;
+  textoCentro("segure a tela para acelerar", base, COR.hudFraco, 1);
+  textoCentro("arraste para virar", base + 11, COR.hudFraco, 1);
+  textoCentro("devore a Terra e ganhe turbo", base + 26, COR.turbo, 1);
 }
 
 function desenharAnalogico() {
