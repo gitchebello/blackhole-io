@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#05030f">
+<title>Buraco Negro</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    background:#05030f;
+    touch-action:none; -webkit-user-select:none; user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #tela {
+    display:block; width:100vw; height:100vh;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+</style>
+</head>
+<body>
+<canvas id="tela"></canvas>
+<script>
+"use strict";
+
+/* ══════════════════════════════════════════════════════════════
+   BURACO NEGRO — protótipo 01
+   Nebulosa criadora de estrelas. O jogador é um buraco negro que
+   engole estrelas e cresce a cada 5 delas.
+   Toque e segure para acelerar; arraste para escolher a direção.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── parâmetros (mexa aqui pra ajustar o jogo) ───────────────── */
+const CFG = {
+  ESTRELAS: 30,          // quantas estrelas existem no campo ao mesmo tempo
+  POR_NIVEL: 5,          // quantas estrelas para crescer um nível
+  REPOR: true,           // repor a estrela comida em outro lugar do mapa
+  RAIO_BASE: 6,          // raio do buraco negro no nível 0 (em pixels do jogo)
+  RAIO_PASSO: 2,         // quanto o raio cresce por nível
+  ACEL: 0.34,            // aceleração ao segurar o toque
+  ATRITO: 0.93,          // quanto a velocidade decai por quadro
+  VEL_MAX: 1.9,          // velocidade máxima no nível 0
+  VEL_PERDA: 0.09,       // quanto de velocidade máxima se perde por nível
+  ALCANCE_SUCCAO: 3.2,   // raio de atração, em múltiplos do raio do buraco
+  FORCA_SUCCAO: 0.16,    // força com que a estrela é puxada
+  MUNDO_MULT: 1.5,       // o mundo tem esta vez o tamanho da tela (1 = só uma tela)
+  LARG_VISAO: 240,       // largura da câmera, em pixels do jogo
+  ZONA_MORTA: 4,         // arrasto mínimo (em px de tela) para virar direção
+  RAIO_ANALOG: 22,       // alcance do analógico flutuante
+  SEMENTE: 20260823      // semente da nebulosa
+};
+
+/* ── paleta ──────────────────────────────────────────────────── */
+const COR = {
+  vazio:  "#05030f",
+  neb:  ["#0b0620","#150a31","#22104a","#331868","#4d2490",
+         "#06181f","#092833","#0e3c49","#145a66","#1c8590"],
+  poeira:["#1b1436","#281d4c","#352763"],
+  estrela:["#6b5fb0","#b4a6f5","#e8e2ff","#ffffff"],
+  disco: ["#2a0d3f","#5c1a6b","#a32b74","#e2543f","#ff9a3c","#ffd166","#fff3c4","#ffffff"],
+  halo:   "#3b1a6b",
+  borda:  "#1a1030",
+  hud:    "#d9d0ff",
+  hudFraco:"#6b5da8",
+  aviso:  "#ffd166"
+};
+
+/* ── fonte pixel 3x5 ─────────────────────────────────────────── */
+const FONTE = {
+  "0":"###,#.#,#.#,#.#,###", "1":".#.,##.,.#.,.#.,###",
+  "2":"###,..#,###,#..,###", "3":"###,..#,.##,..#,###",
+  "4":"#.#,#.#,###,..#,..#", "5":"###,#..,###,..#,###",
+  "6":"###,#..,###,#.#,###", "7":"###,..#,..#,..#,..#",
+  "8":"###,#.#,###,#.#,###", "9":"###,#.#,###,..#,###",
+  "A":".#.,#.#,###,#.#,#.#", "B":"##.,#.#,##.,#.#,##.",
+  "C":".##,#..,#..,#..,.##", "D":"##.,#.#,#.#,#.#,##.",
+  "E":"###,#..,##.,#..,###", "F":"###,#..,##.,#..,#..",
+  "G":".##,#..,#.#,#.#,.##", "H":"#.#,#.#,###,#.#,#.#",
+  "I":"###,.#.,.#.,.#.,###", "J":"..#,..#,..#,#.#,.#.",
+  "K":"#.#,#.#,##.,#.#,#.#", "L":"#..,#..,#..,#..,###",
+  "M":"#.#,###,###,#.#,#.#", "N":"#.#,###,###,###,#.#",
+  "O":".#.,#.#,#.#,#.#,.#.", "P":"##.,#.#,##.,#..,#..",
+  "Q":".#.,#.#,#.#,##.,.##", "R":"##.,#.#,##.,#.#,#.#",
+  "S":".##,#..,.#.,..#,##.", "T":"###,.#.,.#.,.#.,.#.",
+  "U":"#.#,#.#,#.#,#.#,###", "V":"#.#,#.#,#.#,#.#,.#.",
+  "W":"#.#,#.#,###,###,#.#", "X":"#.#,#.#,.#.,#.#,#.#",
+  "Y":"#.#,#.#,.#.,.#.,.#.", "Z":"###,..#,.#.,#..,###",
+  ":":"...,.#.,...,.#.,...", ".":"...,...,...,...,.#.",
+  "/":"..#,..#,.#.,#..,#..", "-":"...,...,###,...,...",
+  "!":".#.,.#.,.#.,...,.#.", " ":"...,...,...,...,..."
+};
+
+/* ── utilidades ──────────────────────────────────────────────── */
+function semente(a) {                     // gerador determinístico
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const suave = t => t * t * (3 - 2 * t);
+const misturar = (a, b, t) => a + (b - a) * t;
+const limitar = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+/* ── ruído de valor, para desenhar a nebulosa ────────────────── */
+function embaralha(x, y, s) {
+  let h = x * 374761393 + y * 668265263 + s * 1274126177;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function ruido(x, y, s) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const tx = suave(x - xi), ty = suave(y - yi);
+  const a = embaralha(xi, yi, s),       b = embaralha(xi + 1, yi, s);
+  const c = embaralha(xi, yi + 1, s),   d = embaralha(xi + 1, yi + 1, s);
+  return misturar(misturar(a, b, tx), misturar(c, d, tx), ty);
+}
+function fractal(x, y, s, oitavas) {
+  let soma = 0, amp = 1, freq = 1, norma = 0;
+  for (let i = 0; i < oitavas; i++) {
+    soma += ruido(x * freq, y * freq, s + i * 101) * amp;
+    norma += amp; amp *= 0.5; freq *= 2;
+  }
+  return soma / norma;
+}
+
+/* ── canvas e escala ─────────────────────────────────────────── */
+const tela = document.getElementById("tela");
+const ctx = tela.getContext("2d", { alpha: false });
+ctx.imageSmoothingEnabled = false;
+
+let VL = CFG.LARG_VISAO, VA = 400, escala = 2;
+
+function redimensionar() {
+  const sl = Math.max(1, window.innerWidth);
+  const sa = Math.max(1, window.innerHeight);
+  escala = Math.max(1, Math.round(sl / CFG.LARG_VISAO));
+  VL = Math.ceil(sl / escala);
+  VA = Math.ceil(sa / escala);
+  tela.width = VL; tela.height = VA;
+  tela.style.width = sl + "px";
+  tela.style.height = sa + "px";
+  ctx.imageSmoothingEnabled = false;
+}
+window.addEventListener("resize", redimensionar);
+redimensionar();
+
+/* ── tamanho do mundo: múltiplo da tela, para a densidade de
+      estrelas ser a mesma em qualquer celular ─────────────────── */
+const MUNDO = {
+  L: Math.round(VL * CFG.MUNDO_MULT),
+  A: Math.round(VA * CFG.MUNDO_MULT)
+};
+
+/* ── a nebulosa é pintada uma vez num canvas do tamanho do mundo ── */
+const fundo = document.createElement("canvas");
+fundo.width = MUNDO.L; fundo.height = MUNDO.A;
+
+// matriz de Bayer: mistura duas cores vizinhas com pontilhado,
+// que é como a pixel art faz degradê sem inventar cor nova
+const BAYER = [
+   0,  8,  2, 10,
+  12,  4, 14,  6,
+   3, 11,  1,  9,
+  15,  7, 13,  5
+];
+
+function pintarNebulosa() {
+  const fx = fundo.getContext("2d");
+  const img = fx.createImageData(MUNDO.L, MUNDO.A);
+  const d = img.data;
+  const rgb = hex => [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+  const paleta = COR.neb.map(rgb);
+  const vazio = rgb(COR.vazio);
+  const QUENTE = 0, FRIO = 5, DEGRAUS = 5;   // dois braços de gás, 5 tons cada
+  const esc = 1 / 46;                        // nuvens menores = mais detalhe
+  const LIMIAR = 0.55;                       // acima disso tem gás; abaixo é vácuo
+
+  for (let y = 0; y < MUNDO.A; y++) {
+    for (let x = 0; x < MUNDO.L; x++) {
+      const roxo  = fractal(x * esc, y * esc, CFG.SEMENTE, 5);
+      const ciano = fractal(x * esc * 1.25 + 60, y * esc * 1.25 - 35, CFG.SEMENTE + 777, 5);
+      const mescla = fractal(x * esc * 0.35, y * esc * 0.35, CFG.SEMENTE + 313, 2);
+
+      const peso = limitar((mescla - 0.42) * 3.0, 0, 1);
+      const densidade = misturar(roxo, ciano, peso);
+
+      const i = (y * MUNDO.L + x) * 4;
+      let cor;
+      if (densidade <= LIMIAR) {
+        cor = vazio;
+      } else {
+        const t = (densidade - LIMIAR) / (1 - LIMIAR);          // 0..1 dentro do gás
+        const escala = Math.pow(t, 0.65) * (DEGRAUS - 1);       // tons médios sem estourar
+        const base = Math.floor(escala);
+        const frac = escala - base;
+        const limiarDither = BAYER[(x & 3) + (y & 3) * 4] / 16;
+        const passo = Math.min(DEGRAUS - 1, base + (frac > limiarDither ? 1 : 0));
+        cor = paleta[(peso > 0.5 ? FRIO : QUENTE) + passo];
+      }
+      d[i] = cor[0]; d[i+1] = cor[1]; d[i+2] = cor[2]; d[i+3] = 255;
+    }
+  }
+  fx.putImageData(img, 0, 0);
+
+  // poeira estelar: pontinhos fixos que dão profundidade (não são comestíveis)
+  const r = semente(CFG.SEMENTE + 99);
+  const pontos = Math.round(MUNDO.L * MUNDO.A / 900);
+  for (let i = 0; i < pontos; i++) {
+    fx.fillStyle = COR.poeira[Math.floor(r() * COR.poeira.length)];
+    fx.fillRect(Math.floor(r() * MUNDO.L), Math.floor(r() * MUNDO.A), 1, 1);
+  }
+  for (let i = 0; i < pontos / 8; i++) {   // algumas mais claras, bem raras
+    fx.fillStyle = COR.estrela[0];
+    fx.fillRect(Math.floor(r() * MUNDO.L), Math.floor(r() * MUNDO.A), 1, 1);
+  }
+}
+pintarNebulosa();
+
+/* ── desenho em pixel cheio (sem antialias) ──────────────────── */
+function disco(cx, cy, raio, cor) {
+  ctx.fillStyle = cor;
+  const r = Math.round(raio), x0 = Math.round(cx), y0 = Math.round(cy);
+  for (let dy = -r; dy <= r; dy++) {
+    const larg = Math.floor(Math.sqrt(Math.max(0, r * r - dy * dy)) + 0.5);
+    if (larg <= 0) continue;
+    ctx.fillRect(x0 - larg, y0 + dy, larg * 2 + 1, 1);
+  }
+}
+function px(x, y, cor) {
+  ctx.fillStyle = cor;
+  ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+}
+function texto(str, x, y, cor, tam, semSombra) {
+  tam = tam || 1;
+  if (!semSombra) desenhaGlifos(str, x + tam, y + tam, "#05030f", tam);
+  desenhaGlifos(str, x, y, cor, tam);
+}
+function desenhaGlifos(str, x, y, cor, tam) {
+  ctx.fillStyle = cor;
+  let cx = Math.round(x);
+  for (const ch of str.toUpperCase()) {
+    const g = FONTE[ch] || FONTE[" "];
+    const linhas = g.split(",");
+    for (let ly = 0; ly < 5; ly++)
+      for (let lx = 0; lx < 3; lx++)
+        if (linhas[ly][lx] === "#")
+          ctx.fillRect(cx + lx * tam, Math.round(y) + ly * tam, tam, tam);
+    cx += 4 * tam;
+  }
+}
+const larguraTexto = (str, tam) => str.length * 4 * (tam || 1) - (tam || 1);
+
+/* ── estado do jogo ──────────────────────────────────────────── */
+const rnd = semente(CFG.SEMENTE + 4242);
+
+const buraco = {
+  x: MUNDO.L / 2, y: MUNDO.A / 2,
+  vx: 0, vy: 0,
+  ang: -Math.PI / 2,
+  raio: CFG.RAIO_BASE,
+  raioAlvo: CFG.RAIO_BASE,
+  nivel: 0
+};
+let estrelas = [], faiscas = [], comidas = 0, tremor = 0, flash = 0, quadro = 0;
+let comecou = false;
+const cam = { x: 0, y: 0 };
+
+function novaEstrela(longeDe) {
+  for (let tent = 0; tent < 60; tent++) {
+    const e = {
+      x: 12 + rnd() * (MUNDO.L - 24),
+      y: 12 + rnd() * (MUNDO.A - 24),
+      fase: rnd() * Math.PI * 2,
+      ritmo: 0.05 + rnd() * 0.07,
+      brilho: rnd(),
+      vx: 0, vy: 0,
+      presa: false
+    };
+    if (!longeDe) return e;
+    const d = Math.hypot(e.x - longeDe.x, e.y - longeDe.y);
+    if (d > Math.max(VL, 90)) return e;
+  }
+  return { x: rnd() * MUNDO.L, y: rnd() * MUNDO.A, fase: 0,
+           ritmo: 0.06, brilho: 0.5, vx: 0, vy: 0, presa: false };
+}
+
+function reiniciar() {
+  buraco.x = MUNDO.L / 2; buraco.y = MUNDO.A / 2;
+  buraco.vx = buraco.vy = 0; buraco.ang = -Math.PI / 2;
+  buraco.raio = buraco.raioAlvo = CFG.RAIO_BASE; buraco.nivel = 0;
+  comidas = 0; faiscas = []; tremor = 0; flash = 0;
+  estrelas = [];
+  for (let i = 0; i < CFG.ESTRELAS; i++) estrelas.push(novaEstrela(buraco));
+  cam.x = buraco.x - VL / 2; cam.y = buraco.y - VA / 2;
+}
+reiniciar();
+
+/* ── controle: analógico flutuante ───────────────────────────── */
+const toque = { ativo: false, ax: 0, ay: 0, x: 0, y: 0, id: null };
+const teclas = Object.create(null);
+
+function inicio(x, y, id) {
+  toque.ativo = true; toque.id = id;
+  toque.ax = x; toque.ay = y; toque.x = x; toque.y = y;
+  comecou = true;
+}
+function mover(x, y) {
+  toque.x = x; toque.y = y;
+  // o centro do analógico segue o dedo quando ele passa do alcance
+  const dx = toque.x - toque.ax, dy = toque.y - toque.ay;
+  const d = Math.hypot(dx, dy), lim = CFG.RAIO_ANALOG * escala;
+  if (d > lim) {
+    toque.ax = toque.x - (dx / d) * lim;
+    toque.ay = toque.y - (dy / d) * lim;
+  }
+}
+function fim() { toque.ativo = false; toque.id = null; }
+
+tela.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  if (toque.id !== null) return;
+  tela.setPointerCapture(e.pointerId);
+  inicio(e.clientX, e.clientY, e.pointerId);
+});
+tela.addEventListener("pointermove", e => {
+  if (!toque.ativo || e.pointerId !== toque.id) return;
+  e.preventDefault();
+  mover(e.clientX, e.clientY);
+});
+for (const ev of ["pointerup", "pointercancel", "pointerleave"])
+  tela.addEventListener(ev, e => { if (e.pointerId === toque.id) fim(); });
+
+window.addEventListener("keydown", e => {
+  teclas[e.key] = true; comecou = true;
+  if (e.key === "r" || e.key === "R") reiniciar();
+});
+window.addEventListener("keyup", e => { teclas[e.key] = false; });
+
+/* ── lógica ──────────────────────────────────────────────────── */
+function velMax() {
+  return Math.max(0.9, CFG.VEL_MAX - buraco.nivel * CFG.VEL_PERDA);
+}
+
+function passo() {
+  quadro++;
+
+  /* entrada */
+  let ax = 0, ay = 0, acelerando = false;
+  if (toque.ativo) {
+    const dx = toque.x - toque.ax, dy = toque.y - toque.ay;
+    const d = Math.hypot(dx, dy);
+    if (d > CFG.ZONA_MORTA) buraco.ang = Math.atan2(dy, dx);
+    acelerando = true;
+  }
+  let tx = 0, ty = 0;
+  if (teclas.ArrowLeft  || teclas.a || teclas.A) tx -= 1;
+  if (teclas.ArrowRight || teclas.d || teclas.D) tx += 1;
+  if (teclas.ArrowUp    || teclas.w || teclas.W) ty -= 1;
+  if (teclas.ArrowDown  || teclas.s || teclas.S) ty += 1;
+  if (tx || ty) { buraco.ang = Math.atan2(ty, tx); acelerando = true; }
+
+  if (acelerando) {
+    ax = Math.cos(buraco.ang) * CFG.ACEL;
+    ay = Math.sin(buraco.ang) * CFG.ACEL;
+  }
+
+  /* movimento */
+  buraco.vx = (buraco.vx + ax) * CFG.ATRITO;
+  buraco.vy = (buraco.vy + ay) * CFG.ATRITO;
+  const v = Math.hypot(buraco.vx, buraco.vy), vm = velMax();
+  if (v > vm) { buraco.vx = buraco.vx / v * vm; buraco.vy = buraco.vy / v * vm; }
+  buraco.x += buraco.vx; buraco.y += buraco.vy;
+
+  /* paredes do mundo */
+  const m = buraco.raio + 1;
+  if (buraco.x < m) { buraco.x = m; buraco.vx *= -0.35; }
+  if (buraco.y < m) { buraco.y = m; buraco.vy *= -0.35; }
+  if (buraco.x > MUNDO.L - m) { buraco.x = MUNDO.L - m; buraco.vx *= -0.35; }
+  if (buraco.y > MUNDO.A - m) { buraco.y = MUNDO.A - m; buraco.vy *= -0.35; }
+
+  buraco.raio += (buraco.raioAlvo - buraco.raio) * 0.14;
+
+  /* estrelas: atração e absorção */
+  const alcance = buraco.raio * CFG.ALCANCE_SUCCAO;
+  for (let i = 0; i < estrelas.length; i++) {
+    const e = estrelas[i];
+    e.fase += e.ritmo;
+    const dx = buraco.x - e.x, dy = buraco.y - e.y;
+    const d = Math.hypot(dx, dy) || 0.001;
+
+    if (d < alcance) {
+      e.presa = true;
+      const forca = CFG.FORCA_SUCCAO * (1 - d / alcance) + 0.02;
+      e.vx += (dx / d) * forca;
+      e.vy += (dy / d) * forca;
+    } else if (e.presa) {
+      e.presa = false;
+      e.vx *= 0.9; e.vy *= 0.9;
+    }
+    e.x += e.vx; e.y += e.vy;
+    e.vx *= 0.985; e.vy *= 0.985;
+
+    if (d < buraco.raio * 0.85) engolir(i);
+  }
+
+  /* faíscas do disco de acreção */
+  for (let i = faiscas.length - 1; i >= 0; i--) {
+    const f = faiscas[i];
+    f.x += f.vx; f.y += f.vy; f.vx *= 0.9; f.vy *= 0.9; f.vida--;
+    if (f.vida <= 0) faiscas.splice(i, 1);
+  }
+
+  if (tremor > 0) tremor *= 0.86;
+  if (flash > 0) flash--;
+
+  /* câmera */
+  const alvoX = limitar(buraco.x - VL / 2, 0, Math.max(0, MUNDO.L - VL));
+  const alvoY = limitar(buraco.y - VA / 2, 0, Math.max(0, MUNDO.A - VA));
+  cam.x += (alvoX - cam.x) * 0.12;
+  cam.y += (alvoY - cam.y) * 0.12;
+}
+
+function engolir(indice) {
+  const e = estrelas[indice];
+  for (let k = 0; k < 7; k++) {
+    const a = Math.random() * Math.PI * 2, s = 0.4 + Math.random() * 1.1;
+    faiscas.push({
+      x: e.x, y: e.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      vida: 10 + Math.floor(Math.random() * 10),
+      cor: COR.disco[3 + Math.floor(Math.random() * 5)]
+    });
+  }
+  comidas++;
+  if (CFG.REPOR) estrelas[indice] = novaEstrela(buraco);
+  else estrelas.splice(indice, 1);
+
+  const nivel = Math.floor(comidas / CFG.POR_NIVEL);
+  if (nivel > buraco.nivel) {
+    buraco.nivel = nivel;
+    buraco.raioAlvo = CFG.RAIO_BASE + nivel * CFG.RAIO_PASSO;
+    tremor = 5; flash = 26;
+  }
+}
+
+/* ── desenho ─────────────────────────────────────────────────── */
+function desenhar() {
+  const sx = Math.round(cam.x + (tremor > 0.3 ? (Math.random() - 0.5) * tremor : 0));
+  const sy = Math.round(cam.y + (tremor > 0.3 ? (Math.random() - 0.5) * tremor : 0));
+
+  ctx.fillStyle = COR.vazio;
+  ctx.fillRect(0, 0, VL, VA);
+  ctx.drawImage(fundo, -sx, -sy);
+
+  /* borda do mundo */
+  ctx.fillStyle = COR.borda;
+  if (sx < 1) ctx.fillRect(-sx - 1, 0, 1, VA);
+  if (sy < 1) ctx.fillRect(0, -sy - 1, VL, 1);
+  if (sx > MUNDO.L - VL - 1) ctx.fillRect(MUNDO.L - sx, 0, 1, VA);
+  if (sy > MUNDO.A - VA - 1) ctx.fillRect(0, MUNDO.A - sy, VL, 1);
+
+  /* estrelas */
+  for (const e of estrelas) {
+    const x = e.x - sx, y = e.y - sy;
+    if (x < -6 || y < -6 || x > VL + 6 || y > VA + 6) continue;
+    // brilho oscilante quantizado em 4 níveis
+    const osc = (Math.sin(e.fase) + 1) / 2;
+    const n = Math.min(3, 1 + Math.floor(osc * 2.15 + (e.presa ? 0.9 : 0)));
+    const halo = COR.estrela[Math.max(0, n - 2)];
+    px(x - 1, y, halo); px(x + 1, y, halo);     // halo em cruz, sempre
+    px(x, y - 1, halo); px(x, y + 1, halo);
+    px(x, y, COR.estrela[n]);                   // núcleo, o que pulsa
+    if (n === 3 && (osc > 0.9 || e.presa)) {    // pico do brilho: pontas longas
+      const ponta = COR.estrela[1];
+      px(x - 2, y, ponta); px(x + 2, y, ponta);
+      px(x, y - 2, ponta); px(x, y + 2, ponta);
+    }
+    if (e.presa) {                      // rastro em direção ao buraco
+      const dx = buraco.x - e.x, dy = buraco.y - e.y;
+      const d = Math.hypot(dx, dy) || 1;
+      px(x - dx / d * 2, y - dy / d * 2, COR.estrela[1]);
+    }
+  }
+
+  /* faíscas */
+  for (const f of faiscas) px(f.x - sx, f.y - sy, f.cor);
+
+  /* buraco negro */
+  const bx = buraco.x - sx, by = buraco.y - sy, r = buraco.raio;
+
+  // lente gravitacional: um halo largo e tênue de luz entortada
+  ctx.globalAlpha = 0.13;
+  disco(bx, by, r + 6, COR.halo);
+  ctx.globalAlpha = 0.16;
+  disco(bx, by, r + 3, COR.halo);
+  ctx.globalAlpha = 1;
+
+  // disco de acreção: 3 camadas de pixels, quentes por dentro e frias por fora.
+  // Um dos lados brilha mais e gira — é o gás vindo na nossa direção.
+  const giro = quadro * 0.045;
+  const N = COR.disco.length;
+  for (let k = 0; k < 3; k++) {
+    const rr = r + 1 + k;
+    const passos = Math.max(20, Math.ceil(rr * 7));
+    for (let i = 0; i < passos; i++) {
+      const a = (i / passos) * Math.PI * 2;
+      const doppler = 0.42 + 0.58 * (0.5 + 0.5 * Math.sin(a - giro));
+      const grumo  = 0.85 + 0.15 * Math.sin(a * 5 + giro * 2.3);   // granulado do gás
+      const intensidade = doppler * grumo * (1 - k * 0.34);
+      if (intensidade < 0.22) continue;                            // borda irregular
+      const cor = COR.disco[Math.min(N - 1, Math.floor(intensidade * N))];
+      px(bx + Math.cos(a) * rr, by + Math.sin(a) * rr, cor);
+    }
+  }
+
+  // horizonte de eventos: o vazio absoluto no meio
+  disco(bx, by, r, "#000000");
+
+  // anel de fótons: fio de luz colado na borda do horizonte
+  const passosFoton = Math.max(24, Math.ceil(r * 8));
+  for (let i = 0; i < passosFoton; i++) {
+    const a = (i / passosFoton) * Math.PI * 2;
+    const b = 0.5 + 0.5 * Math.sin(a - giro);
+    if (b > 0.62) px(bx + Math.cos(a) * r, by + Math.sin(a) * r,
+                     COR.disco[b > 0.9 ? N - 1 : N - 3]);
+  }
+
+  // rastro de luz do lado para onde ele corre
+  const va = Math.hypot(buraco.vx, buraco.vy);
+  if (va > 0.2) {
+    const ah = Math.atan2(buraco.vy, buraco.vx) + Math.PI;
+    for (let i = -2; i <= 2; i++) {
+      const a = ah + i * 0.3;
+      px(bx + Math.cos(a) * (r + 4), by + Math.sin(a) * (r + 4), COR.disco[2]);
+    }
+  }
+
+  if (flash > 0 && flash % 6 < 3) {
+    ctx.globalAlpha = 0.35;
+    disco(bx, by, r + 5, COR.disco[5]);
+    ctx.globalAlpha = 1;
+  }
+
+  desenharHUD();
+  desenharAnalogico();
+}
+
+function desenharHUD() {
+  const faltam = CFG.POR_NIVEL - (comidas % CFG.POR_NIVEL);
+  texto("ESTRELAS " + comidas, 5, 5, COR.hud, 1);
+  texto("NIVEL " + buraco.nivel, 5, 12, COR.hudFraco, 1);
+
+  // barra de progresso até o próximo nível
+  const larg = 40, cheio = Math.round((comidas % CFG.POR_NIVEL) / CFG.POR_NIVEL * larg);
+  ctx.fillStyle = COR.borda; ctx.fillRect(VL - larg - 5, 5, larg, 3);
+  ctx.fillStyle = COR.disco[1]; ctx.fillRect(VL - larg - 5, 5, cheio, 3);
+  const rot = faltam + " P/ CRESCER";
+  texto(rot, VL - 5 - larguraTexto(rot, 1), 11, COR.hudFraco, 1);
+
+  if (flash > 0) {
+    const t = "CRESCEU!";
+    texto(t, (VL - larguraTexto(t, 2)) / 2, VA * 0.3, COR.aviso, 2);
+  }
+  if (!comecou) {
+    const l1 = "SEGURE E ARRASTE";
+    const l2 = "PARA ENGOLIR AS ESTRELAS";
+    texto(l1, (VL - larguraTexto(l1, 1)) / 2, VA - 40, COR.hud, 1);
+    texto(l2, (VL - larguraTexto(l2, 1)) / 2, VA - 30, COR.hudFraco, 1);
+  }
+}
+
+function desenharAnalogico() {
+  if (!toque.ativo) return;
+  const cx = toque.ax / escala, cy = toque.ay / escala;
+  const fx = toque.x / escala, fy = toque.y / escala;
+  ctx.globalAlpha = 0.5;
+  for (let i = 0; i < 20; i++) {          // anel pontilhado do analógico
+    const a = (i / 20) * Math.PI * 2;
+    px(cx + Math.cos(a) * CFG.RAIO_ANALOG, cy + Math.sin(a) * CFG.RAIO_ANALOG, COR.hudFraco);
+  }
+  ctx.globalAlpha = 0.85;
+  disco(fx, fy, 2, COR.hud);
+  ctx.globalAlpha = 1;
+}
+
+/* ── laço principal ──────────────────────────────────────────── */
+let acumulado = 0, ultimo = performance.now();
+const DT = 1000 / 60;
+
+function laco(agora) {
+  acumulado += Math.min(100, agora - ultimo);
+  ultimo = agora;
+  while (acumulado >= DT) { passo(); acumulado -= DT; }
+  desenhar();
+  requestAnimationFrame(laco);
+}
+requestAnimationFrame(laco);
+</script>
+</body>
+</html>
