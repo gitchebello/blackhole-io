@@ -114,10 +114,10 @@ const CFG = {
   /* cometa: o de rabo azul, que congela quem encostar */
   COMETA_INTERVALO: 600,   // 600 quadros = 10 segundos
   COMETA_VEL: 2.5,         // mais devagar que a cadente: dá para desviar
-  COMETA_RAIO: 6,
+  COMETA_RAIO: 11,        // bem maior que a cadente: é obstáculo, não prêmio
   COMETA_GELO: 300,        // duração do congelamento (300 = 5s)
   COMETA_FREIO: 0.75,      // fica com 75% da velocidade enquanto durar
-  COMETA_RABO: 26,         // comprimento do rastro azul
+  COMETA_RABO: 34,         // comprimento do rastro azul
   ABERRACAO_MAX: 2,      // deslocamento máximo dos canais, em pixels
 
   /* controle */
@@ -1766,25 +1766,39 @@ function desenharCadente() {
 /* O rabo é o que dá o aviso: longo, azul, e engrossando perto da cabeça. */
 function desenharCometa() {
   if (!cometa) return;
+  const R = CFG.COMETA_RAIO;
   const n = cometa.rastro.length;
+  // o rabo engrossa perto da cabeça e afina até sumir, na medida do raio
   for (let i = n - 1; i >= 0; i--) {
     const r = cometa.rastro[i];
     const p = 1 - i / n;                        // 1 na cabeça, 0 na ponta do rabo
     const x = paraTelaX(r.x), y = paraTelaY(r.y);
-    ctx.globalAlpha = 0.16 + p * 0.84;
+    ctx.globalAlpha = 0.14 + p * 0.7;
     const cor = COR.cometa[p > 0.72 ? 1 : p > 0.4 ? 2 : 3];
-    px(x, y, cor);
-    if (p > 0.35) { px(x + 1, y, cor); px(x, y + 1, cor); }
-    if (p > 0.7)  { px(x - 1, y, cor); px(x, y - 1, cor); }
+    const w = R * 0.62 * Math.pow(p, 0.8);
+    if (w < 0.8) px(x, y, cor);
+    else disco(x, y, w, cor);
   }
   ctx.globalAlpha = 1;
+
   const x = paraTelaX(cometa.x), y = paraTelaY(cometa.y);
-  ctx.globalAlpha = 0.45;                       // coma: o halo gelado da cabeça
-  disco(x, y, CFG.COMETA_RAIO + 2, COR.cometa[1]);
+  ctx.globalAlpha = 0.3;                        // coma: o halo gelado da cabeça
+  disco(x, y, R + 3, COR.cometa[1]);
+  ctx.globalAlpha = 0.55;
+  disco(x, y, R, COR.cometa[1]);
   ctx.globalAlpha = 1;
-  disco(x, y, 3, COR.cometa[0]);
-  disco(x, y, 2, COR.cometa[2]);
+  disco(x, y, R * 0.62, COR.cometa[0]);
+  disco(x, y, R * 0.4, COR.cometa[2]);
+  // núcleo em cruz: um disco de raio 2 sai quadrado e estraga a cabeça
   px(x, y, COR.cometa[4]);
+  px(x - 1, y, COR.cometa[4]); px(x + 1, y, COR.cometa[4]);
+  px(x, y - 1, COR.cometa[4]); px(x, y + 1, COR.cometa[4]);
+  // lascas orbitando o núcleo: dá a sensação de bola de gelo, não de bolinha
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2 + quadro * 0.05;
+    const rr = R * (0.72 + 0.16 * Math.sin(quadro * 0.13 + k));
+    px(x + Math.cos(a) * rr, y + Math.sin(a) * rr, COR.cometa[k % 2 ? 0 : 3]);
+  }
 }
 
 function desenharBuraco() {
@@ -1922,16 +1936,59 @@ function barra(x, y, l, p, cor) {
   ctx.fillStyle = cor; ctx.fillRect(x, y, Math.round(limitar(p, 0, 1) * l), 3);
 }
 
-function marcaNaBorda(mx0, my0, raio, corFora, corDentro, corFarpa) {
+/* Triângulo cheio apontando para `ang`: começa em (x,y) e afina até a ponta.
+   Rasterizado a mão porque em pixel art um path com antialias vira borrão. */
+function seta(x, y, ang, tam, larg, cor) {
+  ctx.fillStyle = cor;
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const nx = -sa, ny = ca;                       // perpendicular
+  const n = Math.round(tam);
+  for (let i = 0; i <= n; i++) {
+    const w = Math.round((1 - i / n) * larg);
+    for (let j = -w; j <= w; j++)
+      ctx.fillRect(Math.round(x + ca * i + nx * j), Math.round(y + sa * i + ny * j), 1, 1);
+  }
+}
+
+/* Marca de borda: aponta para algo que está fora da tela. Ela respira na
+   direção do alvo (avança e recua) e leva um halo, senão some no fundo claro.
+   `estilo` muda a silhueta para dar de ler qual é qual sem depender da cor:
+   0 = seta cheia (rival), 1 = seta com miolo aceso (prêmios), 2 = seta dupla,
+   de perigo vindo rápido (cometa). */
+function marcaNaBorda(mx0, my0, cores, estilo) {
   const cx = VL / 2, cy = VA / 2;
   const dx = mx0 - cx, dy = my0 - cy;
-  const m = Math.max(Math.abs(dx) / (VL / 2 - 8), Math.abs(dy) / (VA / 2 - 8), 0.001);
-  const mx = cx + dx / m, my = cy + dy / m;
-  disco(mx, my, 4, COR.vazio);
-  disco(mx, my, 3, corFora);
-  disco(mx, my, 2, corDentro);
-  const a = Math.atan2(dy, dx);
-  for (let i = 3; i <= 6; i++) px(mx + Math.cos(a) * i, my + Math.sin(a) * i, corFarpa);
+  const ang = Math.atan2(dy, dx);
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const pulso = 0.5 + 0.5 * Math.sin(quadro * 0.11);
+
+  // a margem encolhe com o pulso: é isso que faz a seta cutucar para fora
+  const marg = 15 - pulso * 4;
+  const m = Math.max(Math.abs(dx) / (VL / 2 - marg),
+                     Math.abs(dy) / (VA / 2 - marg), 0.001);
+  const bx = cx + dx / m, by = cy + dy / m;
+
+  const tam = 8 + pulso * 2.6;
+  const larg = 4.2;
+
+  // halo em três camadas, cada uma mais fraca e mais larga
+  for (let k = 3; k >= 1; k--) {
+    ctx.globalAlpha = (0.08 + pulso * 0.08) * k / 3;
+    disco(bx, by, tam * 0.75 + k * 2.6, cores[0]);
+  }
+  ctx.globalAlpha = 1;
+
+  const rx = bx - ca * tam * 0.55, ry = by - sa * tam * 0.55;
+  if (estilo === 2) {                            // a segunda seta vem primeiro, atrás
+    const qx = rx - ca * (tam * 0.5 + 3), qy = ry - sa * (tam * 0.5 + 3);
+    seta(qx - ca, qy - sa, ang, tam * 0.55 + 2.4, larg * 0.65 + 1.3, COR.vazio);
+    seta(qx, qy, ang, tam * 0.55, larg * 0.65, cores[2]);
+  }
+  seta(rx - ca, ry - sa, ang, tam + 2.4, larg + 1.3, COR.vazio);   // contorno
+  seta(rx, ry, ang, tam, larg, cores[1]);
+  // miolo aceso: um ponto claro no meio do corpo, não uma segunda seta
+  // (uma seta dentro da outra vira serrilhado nesse tamanho)
+  if (estilo === 1) disco(rx + ca * tam * 0.32, ry + sa * tam * 0.32, 1.6, cores[2]);
 }
 
 /* quando o rival sai de vista, uma marca azul na borda mostra onde ele está */
@@ -1939,26 +1996,37 @@ function desenharMarcaRival() {
   const rx = paraTelaX(rival.x), ry = paraTelaY(rival.y);
   const rr = raioMundoNivel(rival.nivel) * zoom;
   if (rx > -rr && rx < VL + rr && ry > -rr && ry < VA + rr) return;
-  marcaNaBorda(rx, ry, rr, COR.rivalContorno, COR.discoR[5], COR.discoR[6]);
+  marcaNaBorda(rx, ry, [COR.discoR[4], COR.discoR[6], COR.discoR[2]], 0);
 }
 
 function desenharMarcaCadente() {
   if (!cadente) return;
   const x = paraTelaX(cadente.x), y = paraTelaY(cadente.y);
   if (x > -8 && x < VL + 8 && y > -8 && y < VA + 8) return;
-  marcaNaBorda(x, y, 6, COR.cadente[0], COR.cadente[1], COR.cadente[2]);
+  marcaNaBorda(x, y, [COR.cadente[1], COR.cadente[2], COR.cadente[0]], 1);
 }
 
 function desenharMarcaIo() {
   if (!io) return;
   const x = paraTelaX(io.x), y = paraTelaY(io.y);
   if (x > -8 && x < VL + 8 && y > -8 && y < VA + 8) return;
-  marcaNaBorda(x, y, 6, COR.fogo[1], COR.fogo[2], COR.fogo[3]);
+  marcaNaBorda(x, y, [COR.fogo[2], COR.fogo[3], COR.fogo[0]], 1);
+}
+
+/* O cometa é perigo, então usa a seta dupla: mesmo em azul, a silhueta não
+   deixa confundir com a marca do rival. */
+function desenharMarcaCometa() {
+  if (!cometa) return;
+  const x = paraTelaX(cometa.x), y = paraTelaY(cometa.y);
+  const r = CFG.COMETA_RAIO;
+  if (x > -r && x < VL + r && y > -r && y < VA + r) return;
+  marcaNaBorda(x, y, [COR.cometa[2], COR.cometa[4], COR.cometa[0]], 2);
 }
 
 function desenharHUD() {
   desenharMarcaRival();
   desenharMarcaCadente();
+  desenharMarcaCometa();
   desenharMarcaIo();
   const LARG = 46;
 
