@@ -1,0 +1,2222 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#fdf7fa">
+<title>blackhole.io</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    background:#fdf7fa;
+    touch-action:none; -webkit-user-select:none; user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #tela { display:block; width:100vw; height:100vh;
+          image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+<canvas id="tela"></canvas>
+<script>
+"use strict";
+
+/* ══════════════════════════════════════════════════════════════
+   blackhole.io — protótipo 03
+   Nebulosa criadora de estrelas. Engula estrelas para crescer.
+   O universo se expande junto com você: quanto maior o buraco,
+   mais longe a câmera fica e mais mapa aparece.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── parâmetros (mexa aqui pra ajustar o jogo) ───────────────── */
+const CFG = {
+  /* estrelas */
+  ESTRELAS: 30,          // estrelas no campo no nível 0 (cresce junto com o mundo)
+  DENSIDADE_FIXA: true,  // manter a mesma densidade quando o universo se expande
+
+  /* crescimento */
+  CUSTO_BASE: 5,         // estrelas para sair do nível 0
+  CUSTO_PASSO: 2,        // cada nível custa isso a mais que o anterior
+  NIVEL_MAX: 12,         // teto: sem isso ele engoliria a tela inteira
+  RAIO_BASE: 12,         // raio APARENTE (na tela) no nível 0 — tem que caber a carinha
+  RAIO_TELA_PASSO: 1.4,  // quanto o raio aparente cresce por nível
+
+  /* universo em expansão */
+  ZOOM_PASSO: 0.018,     // quanto a câmera se afasta por nível
+  ZOOM_MIN: 0.78,        // afastamento máximo
+  MUNDO_MULT: 1.8,       // o mundo tem esta vez o tamanho do que a câmera vê
+
+  /* movimento (em pixels de TELA por quadro: o mundo já compensa o zoom) */
+  ACEL: 0.34,
+  ATRITO: 0.93,
+  VEL_MAX: 1.9,
+  VEL_PERDA: 0.05,       // perda de velocidade aparente por nível
+
+  /* sucção */
+  ALCANCE_SUCCAO: 3.6,   // raio de atração, em múltiplos do raio do buraco
+  FORCA_SUCCAO: 0.17,
+  GIRO_SUCCAO: 1.2,      // quanto a estrela rodopia enquanto é sugada
+
+  /* Terra */
+  TERRA_RAIO: 7,         // raio aparente da Terra, na tela
+  TERRA_ESPERA: 600,     // quadros até uma nova Terra aparecer (600 = 10s)
+  TERRA_TURBO: 600,      // duração do turbo (600 = 10s)
+  TERRA_FATOR: 1.5,      // multiplicador de velocidade do turbo
+
+  /* Io — a lua vulcanica: da poder de fogo por um tempo */
+  IO_RAIO: 6,            // raio aparente de Io, na tela
+  IO_ESPERA: 900,        // quadros ate uma nova Io aparecer (900 = 15s)
+  IO_FOGO: 600,          // duracao do poder de fogo (600 = 10s)
+  IO_DANO: 2,            // estrelas que o oponente perde por labareda
+  IO_ALCANCE: 2.2,       // alcance das labaredas, em multiplos do raio
+  IO_RECARGA: 45,        // quadros entre um hit e o outro
+  IO_CLARAO: 26,         // duracao do flash laranja ao devora-la
+  IO_ONDA: 2.4,          // amplitude da miragem, em pixels
+  IO_MIRAGEM: 0.34,      // quanto a imagem desfoca durante o efeito
+
+  NEBULOSAS: 10,          // nuvens de gás espalhadas pelo mapa; o resto é vácuo
+
+  ROSTO: true,           // o buraco negro tem carinha
+
+  /* rival */
+  RIVAL_FORCA: 0.76,     // o quanto o rival acelera comparado a você
+  RIVAL_MIRA: 0.4,       // erro de mira dele, em radianos
+  RIVAL_PENSAR: 24,      // quadros entre uma decisão e outra
+
+  /* efeito da Terra */
+  TERRA_CLARAO: 30,      // duração do flash azul ao devorá-la
+
+  ABERRACAO: 26,         // quadros de aberração cromática ao crescer
+  ARCO: 34,              // quadros do estouro arco-íris ao crescer
+
+  /* vinheta desfocada */
+  VINHETA: true,
+  VINHETA_CURVA: 1.6,    // quanto o desfoque demora a aparecer saindo do centro
+  VINHETA_FIM: 0.96,     // onde ele chega ao máximo (1 = borda da tela)
+  VINHETA_FORCA: 1,
+
+  /* trombada entre os dois */
+  COLISAO_ESTRELAS: 5,   // quantas estrelas o menor perde na trombada
+  COLISAO_EMPURRAO: 9,   // com que força os dois são arremessados
+  COLISAO_ATORDOA: 30,   // quadros sem conseguir acelerar depois da pancada
+  COLISAO_ARRASTO: 0.977,// atrito enquanto voam: menor que o normal, vão longe
+  COLISAO_ESPERA: 50,    // quadros de carência para não trombar em sequência
+  COLISAO_TREMOR: 38,
+  COLISAO_ABERR: 44,
+  COLISAO_CUSTA_NIVEL: true,   // a perda também tira progresso, não só o contador
+
+  /* estrela cadente */
+  CADENTE_INTERVALO: 900,      // 900 quadros = 15 segundos
+  CADENTE_PREMIO: 10,          // estrelas ganhas ao pegá-la
+  CADENTE_VEL: 3.4,
+  CADENTE_RAIO: 7,
+
+  /* cometa: o de rabo azul, que congela quem encostar */
+  COMETA_INTERVALO: 600,   // 600 quadros = 10 segundos
+  COMETA_VEL: 2.5,         // mais devagar que a cadente: dá para desviar
+  COMETA_RAIO: 6,
+  COMETA_GELO: 300,        // duração do congelamento (300 = 5s)
+  COMETA_FREIO: 0.75,      // fica com 75% da velocidade enquanto durar
+  COMETA_RABO: 26,         // comprimento do rastro azul
+  ABERRACAO_MAX: 2,      // deslocamento máximo dos canais, em pixels
+
+  /* controle */
+  ZONA_MORTA: 4,
+  RAIO_ANALOG: 22,
+  SEMENTE: 20260823
+};
+
+/* ── paleta ──────────────────────────────────────────────────── */
+const COR = {
+  vazio:  "#fdf7fa",                                  // o céu agora é branco
+  nebs: [["#ffeef5","#ffdbe9","#ffc4dc","#ffabcd"],   // rosa
+         ["#eef6fd","#dcecfa","#c4e0f6","#a9d2f2"]],  // azul-claro
+  poeira:["#f2e8ee","#ecdfe8","#e4d5e0"],
+  estrela:"#241c33",                                  // estrelas pretas
+  estrelaSuave:"#6a5f80",
+  disco: ["#fff0f6","#ffd9e8","#ffbcd6","#ff97be","#f56fa4","#e04d8c","#c23b76","#a32d63"],
+  halo:   "#ffc4dc",
+  contorno:"#f0b9d0",                                 // fio que dá silhueta ao buraco
+  corpo:  "#ffffff",
+  rosto:  "#2b2233",
+  blush:  "#ff9ecb",
+  coracao:["#e04d8c","#f56fa4","#ffbcd6"],
+  arcoiris:["#ff9ec4","#ffc39a","#ffe98a","#a8e6a1","#8fe3ef","#9fc0ff","#cba6ff"],
+  cadente:["#ffe9a8","#ffd166","#f0b53f"],
+  fogo:   ["#fff0c2","#ffd166","#ff9f45","#f2662f","#cf3a2e"],
+  fogoClarao:"#ffd3a6",
+  fogoBarra:"#f2662f",
+  cometa: ["#f2fbff","#c8e9fa","#96d3f2","#63b4e4","#3d90c8"],
+  gelo:   "#8fd4f0",
+  geloClarao:"#dcf2fd",
+  turbo:  "#4fb8e0",
+  turboClarao:"#bfe4f7",
+  turboPart:["#a9d2f2","#7fb9e4","#5aa4dc","#ffd98a","#ffc75c","#f0b53f"],
+  discoR: ["#f2f8fe","#dcecfa","#c0dcf6","#9cc6f0","#78ade6","#5a93d6","#4477bc","#35619e"],
+  rivalHalo:"#c4dcf6",
+  rivalContorno:"#a9c6ea",
+  rivalBlush:"#9fc8ee",
+  borda:  "#f3dbe6",
+  hud:    "#e8639c",
+  hudFraco:"#c9a0b6",
+  aviso:  "#e8639c",
+  painel: "#fffdfe"
+};
+
+/* ── fonte pixel 5x7 (a 8a linha guarda as descidas de g, j, p, q, y) ── */
+const FONTE_H = 8;
+const FONTE = {
+"A":[".###.","#...#","#...#","#####","#...#","#...#","#...#","....."],
+"B":["####.","#...#","#...#","####.","#...#","#...#","####.","....."],
+"C":[".###.","#...#","#....","#....","#....","#...#",".###.","....."],
+"D":["####.","#...#","#...#","#...#","#...#","#...#","####.","....."],
+"E":["#####","#....","#....","####.","#....","#....","#####","....."],
+"F":["#####","#....","#....","####.","#....","#....","#....","....."],
+"G":[".###.","#...#","#....","#.###","#...#","#...#",".###.","....."],
+"H":["#...#","#...#","#...#","#####","#...#","#...#","#...#","....."],
+"I":["#####","..#..","..#..","..#..","..#..","..#..","#####","....."],
+"J":["..###","...#.","...#.","...#.","...#.","#..#.",".##..","....."],
+"K":["#...#","#..#.","#.#..","##...","#.#..","#..#.","#...#","....."],
+"L":["#....","#....","#....","#....","#....","#....","#####","....."],
+"M":["#...#","##.##","#.#.#","#.#.#","#...#","#...#","#...#","....."],
+"N":["#...#","##..#","#.#.#","#.#.#","#..##","#...#","#...#","....."],
+"O":[".###.","#...#","#...#","#...#","#...#","#...#",".###.","....."],
+"P":["####.","#...#","#...#","####.","#....","#....","#....","....."],
+"Q":[".###.","#...#","#...#","#...#","#.#.#","#..#.",".##.#","....."],
+"R":["####.","#...#","#...#","####.","#.#..","#..#.","#...#","....."],
+"S":[".####","#....","#....",".###.","....#","....#","####.","....."],
+"T":["#####","..#..","..#..","..#..","..#..","..#..","..#..","....."],
+"U":["#...#","#...#","#...#","#...#","#...#","#...#",".###.","....."],
+"V":["#...#","#...#","#...#","#...#","#...#",".#.#.","..#..","....."],
+"W":["#...#","#...#","#...#","#.#.#","#.#.#","##.##","#...#","....."],
+"X":["#...#","#...#",".#.#.","..#..",".#.#.","#...#","#...#","....."],
+"Y":["#...#","#...#",".#.#.","..#..","..#..","..#..","..#..","....."],
+"Z":["#####","....#","...#.","..#..",".#...","#....","#####","....."],
+"a":[".....",".....",".###.","....#",".####","#...#",".####","....."],
+"b":["#....","#....","####.","#...#","#...#","#...#","####.","....."],
+"c":[".....",".....",".####","#....","#....","#....",".####","....."],
+"d":["....#","....#",".####","#...#","#...#","#...#",".####","....."],
+"e":[".....",".....",".###.","#...#","#####","#....",".###.","....."],
+"f":["..##.",".#..#",".#...","####.",".#...",".#...",".#...","....."],
+"g":[".....",".....",".####","#...#","#...#",".####","....#",".###."],
+"h":["#....","#....","####.","#...#","#...#","#...#","#...#","....."],
+"i":["..#..",".....",".##..","..#..","..#..","..#..",".###.","....."],
+"j":["...#.",".....","..##.","...#.","...#.","...#.","#..#.",".##.."],
+"k":["#....","#....","#..#.","#.#..","##...","#.#..","#..#.","....."],
+"l":[".##..","..#..","..#..","..#..","..#..","..#..",".###.","....."],
+"m":[".....",".....","##.#.","#.#.#","#.#.#","#.#.#","#...#","....."],
+"n":[".....",".....","####.","#...#","#...#","#...#","#...#","....."],
+"o":[".....",".....",".###.","#...#","#...#","#...#",".###.","....."],
+"p":[".....",".....","####.","#...#","#...#","####.","#....","#...."],
+"q":[".....",".....",".####","#...#","#...#",".####","....#","....#"],
+"r":[".....",".....","#.##.","##..#","#....","#....","#....","....."],
+"s":[".....",".....",".####","#....",".###.","....#","####.","....."],
+"t":[".#...",".#...","####.",".#...",".#...",".#..#","..##.","....."],
+"u":[".....",".....","#...#","#...#","#...#","#..##",".##.#","....."],
+"v":[".....",".....","#...#","#...#","#...#",".#.#.","..#..","....."],
+"w":[".....",".....","#...#","#.#.#","#.#.#","#.#.#",".#.#.","....."],
+"x":[".....",".....","#...#",".#.#.","..#..",".#.#.","#...#","....."],
+"y":[".....",".....","#...#","#...#","#...#",".####","....#",".###."],
+"z":[".....",".....","#####","...#.","..#..",".#...","#####","....."],
+"0":[".###.","#...#","#..##","#.#.#","##..#","#...#",".###.","....."],
+"1":["..#..",".##..","..#..","..#..","..#..","..#..",".###.","....."],
+"2":[".###.","#...#","....#","...#.","..#..",".#...","#####","....."],
+"3":["#####","...#.","..#..","...#.","....#","#...#",".###.","....."],
+"4":["...#.","..##.",".#.#.","#..#.","#####","...#.","...#.","....."],
+"5":["#####","#....","####.","....#","....#","#...#",".###.","....."],
+"6":["..##.",".#...","#....","####.","#...#","#...#",".###.","....."],
+"7":["#####","....#","...#.","..#..",".#...",".#...",".#...","....."],
+"8":[".###.","#...#","#...#",".###.","#...#","#...#",".###.","....."],
+"9":[".###.","#...#","#...#",".####","....#","...#.",".##..","....."],
+".":[".....",".....",".....",".....",".....",".....","..#..","....."],
+",":[".....",".....",".....",".....",".....","..#..","..#..",".#..."],
+":":[".....",".....","..#..",".....",".....","..#..",".....","....."],
+"/":["....#","....#","...#.","..#..",".#...","#....","#....","....."],
+"-":[".....",".....",".....",".###.",".....",".....",".....","....."],
+"+":[".....","..#..","..#..","#####","..#..","..#..",".....","....."],
+"!":["..#..","..#..","..#..","..#..","..#..",".....","..#..","....."],
+"?":[".###.","#...#","....#","..##.","..#..",".....","..#..","....."],
+" ":[".....",".....",".....",".....",".....",".....",".....","....."]
+};
+
+/* cada glifo guarda onde começa e quanto ocupa: o texto sai proporcional,
+   e não com o espaçamento de máquina de escrever */
+const GLIFOS = {};
+for (const ch in FONTE) {
+  const linhas = FONTE[ch];
+  let c0 = 99, c1 = -1;
+  for (let y = 0; y < FONTE_H; y++)
+    for (let x = 0; x < 5; x++)
+      if (linhas[y][x] === "#") { if (x < c0) c0 = x; if (x > c1) c1 = x; }
+  if (c1 < 0) { c0 = 0; c1 = 1; }                 // o espaço tem 2 de largura
+  GLIFOS[ch] = { linhas: linhas, c0: c0, larg: c1 - c0 + 1 };
+}
+const VAO = 1;                                     // vão entre letras
+const glifo = ch => GLIFOS[ch] || GLIFOS[ch.toUpperCase()] || GLIFOS[" "];
+
+/* ── utilidades ──────────────────────────────────────────────── */
+function semente(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const suave = t => t * t * (3 - 2 * t);
+const misturar = (a, b, t) => a + (b - a) * t;
+const limitar = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+function embaralha(x, y, s) {
+  let h = x * 374761393 + y * 668265263 + s * 1274126177;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function ruido(x, y, s) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const tx = suave(x - xi), ty = suave(y - yi);
+  const a = embaralha(xi, yi, s),     b = embaralha(xi + 1, yi, s);
+  const c = embaralha(xi, yi + 1, s), d = embaralha(xi + 1, yi + 1, s);
+  return misturar(misturar(a, b, tx), misturar(c, d, tx), ty);
+}
+function fractal(x, y, s, oitavas) {
+  let soma = 0, amp = 1, freq = 1, norma = 0;
+  for (let i = 0; i < oitavas; i++) {
+    soma += ruido(x * freq, y * freq, s + i * 101) * amp;
+    norma += amp; amp *= 0.5; freq *= 2;
+  }
+  return soma / norma;
+}
+
+/* ── canvas e escala ─────────────────────────────────────────── */
+const tela = document.getElementById("tela");
+const ctx = tela.getContext("2d", { alpha: false });
+
+let VL = 240, VA = 400, escala = 2;
+
+function redimensionar() {
+  const sl = Math.max(1, window.innerWidth);
+  const sa = Math.max(1, window.innerHeight);
+  escala = Math.max(1, Math.round(sl / 200));
+  VL = Math.ceil(sl / escala);
+  VA = Math.ceil(sa / escala);
+  tela.width = VL; tela.height = VA;
+  tela.style.width = sl + "px";
+  tela.style.height = sa + "px";
+  ctx.imageSmoothingEnabled = false;
+}
+redimensionar();
+window.addEventListener("resize", () => { redimensionar(); });
+
+/* ── o mundo é do tamanho do universo TOTALMENTE expandido; a área
+      jogável começa pequena no meio e vai abrindo conforme o nível ── */
+const MUNDO = {
+  L: Math.ceil(VL / CFG.ZOOM_MIN * CFG.MUNDO_MULT),
+  A: Math.ceil(VA / CFG.ZOOM_MIN * CFG.MUNDO_MULT)
+};
+
+// matriz de Bayer: mistura duas cores vizinhas com pontilhado,
+// que é como a pixel art faz degradê sem inventar cor nova
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+
+/* Sorteia algumas nuvens espalhadas, de cores alternadas. Cada nuvem é
+   um punhado de bolhas redondas que se fundem — fica fofa e simples de ler,
+   em vez de fibrosa. Fora delas o espaço é preto de verdade. */
+function sortearNebulosas() {
+  const r = semente(CFG.SEMENTE + 17);
+  const lista = [];
+  const raioBase = Math.min(MUNDO.L, MUNDO.A) * 0.095;
+  for (let tent = 0; tent < 1200 && lista.length < CFG.NEBULOSAS; tent++) {
+    const rx = raioBase * (0.7 + r() * 0.7);
+    const ry = rx * (0.75 + r() * 0.5);
+    const n = { x: MUNDO.L * (0.12 + r() * 0.76),
+                y: MUNDO.A * (0.10 + r() * 0.80),
+                rx: rx, ry: ry, esc: 1 / (30 + r() * 20),
+                s: Math.floor(r() * 90000), pal: 0, bolhas: [], R: 0 };
+
+    // as bolhas: uma grande no meio e outras menores em volta
+    const quantas = 6 + Math.floor(r() * 4);
+    for (let k = 0; k < quantas; k++) {
+      const a = r() * Math.PI * 2, dist = k === 0 ? 0 : 0.12 + r() * 0.5;
+      const b = { dx: Math.cos(a) * dist * n.rx,
+                  dy: Math.sin(a) * dist * n.ry,
+                  r: (k === 0 ? 0.55 : 0.32 + r() * 0.22) * n.rx };
+      n.bolhas.push(b);
+      n.R = Math.max(n.R, Math.hypot(b.dx, b.dy) + b.r);
+    }
+
+    let cabe = true;
+    for (const o of lista)
+      if (Math.hypot(o.x - n.x, o.y - n.y) < (o.R + n.R) * 0.95) cabe = false;
+    if (cabe) lista.push(n);
+  }
+  // cores: uma parte para cada, embaralhadas, e sem duas vizinhas iguais
+  const vizinho = i => {
+    let melhor = -1, dm = Infinity;
+    for (let j = 0; j < lista.length; j++) {
+      if (j === i) continue;
+      const d = Math.hypot(lista[j].x - lista[i].x, lista[j].y - lista[i].y);
+      if (d < dm) { dm = d; melhor = j; }
+    }
+    return melhor;
+  };
+  for (let i = 0; i < lista.length; i++) lista[i].pal = i % COR.nebs.length;
+  for (let i = lista.length - 1; i > 0; i--) {          // embaralha as cores
+    const j = Math.floor(r() * (i + 1));
+    const t = lista[i].pal; lista[i].pal = lista[j].pal; lista[j].pal = t;
+  }
+  for (let passe = 0; passe < 8; passe++) {
+    let tudoCerto = true;
+    for (let i = 0; i < lista.length; i++) {
+      const v = vizinho(i);
+      if (v < 0 || lista[v].pal !== lista[i].pal) continue;
+      tudoCerto = false;
+      for (let j = 0; j < lista.length; j++)
+        if (j !== i && j !== v && lista[j].pal !== lista[i].pal) {
+          const t = lista[i].pal; lista[i].pal = lista[j].pal; lista[j].pal = t;
+          break;
+        }
+    }
+    if (tudoCerto) break;
+  }
+  return lista;
+}
+const NEBULOSAS = sortearNebulosas();
+
+/* A nebulosa é pintada uma vez POR CAMADA DE ZOOM. Antes existia um único
+   canvas no tamanho do universo inteiro, que era encolhido na hora de
+   desenhar — e encolher pixel art come pixels: o pontilhado virava moiré e
+   ainda custava caro, porque a cada quadro o navegador reamostrava uma área
+   enorme. Agora cada camada já nasce na resolução em que vai aparecer, então
+   o desenho sai 1:1, sem serrilhado e sem reamostragem. */
+function pintarNebulosa(escala) {
+  const L = Math.max(1, Math.round(MUNDO.L * escala));
+  const A = Math.max(1, Math.round(MUNDO.A * escala));
+  const cv = document.createElement("canvas");
+  cv.width = L; cv.height = A;
+  const fx = cv.getContext("2d");
+  const img = fx.createImageData(L, A);
+  const d = img.data;
+  const rgb = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+  const paletas = COR.nebs.map(p => p.map(rgb));
+  const vazio = rgb(COR.vazio);
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = vazio[0]; d[i+1] = vazio[1]; d[i+2] = vazio[2]; d[i+3] = 255;
+  }
+
+  /* densidade em blocos de 2x2 PIXELS DE TELA (assim o grão da nuvem tem
+     o mesmo tamanho aparente em todas as camadas) */
+  const BL = Math.ceil(L / 2), BA = Math.ceil(A / 2);
+  const forca = new Float32Array(BL * BA);
+  const dono  = new Uint8Array(BL * BA);
+
+  for (const n of NEBULOSAS) {
+    const bx0 = Math.max(0, Math.floor((n.x - n.R) * escala / 2));
+    const bx1 = Math.min(BL - 1, Math.ceil((n.x + n.R) * escala / 2));
+    const by0 = Math.max(0, Math.floor((n.y - n.R) * escala / 2));
+    const by1 = Math.min(BA - 1, Math.ceil((n.y + n.R) * escala / 2));
+    for (let by = by0; by <= by1; by++) {
+      for (let bx = bx0; bx <= bx1; bx++) {
+        const x = bx * 2 / escala, y = by * 2 / escala;   // volta pro mundo
+        let v = 0;
+        for (const b of n.bolhas) {          // bolhas que se fundem
+          const dx = x - n.x - b.dx, dy = y - n.y - b.dy;
+          const t = 1 - (dx * dx + dy * dy) / (b.r * b.r);
+          if (t > 0) v += t * t;
+        }
+        if (v <= 0) continue;
+        // um tempero de ruído só para a borda não ficar de compasso
+        v *= 0.82 + 0.3 * fractal(x * n.esc, y * n.esc, n.s, 3);
+        v = Math.min(1, v * 0.32);   // sobra bem mais franja: o gás fica leve
+        if (v <= 0.02) continue;
+        const i = by * BL + bx;
+        if (v > forca[i]) { forca[i] = v; dono[i] = n.pal; }
+      }
+    }
+  }
+
+  const DEGRAUS = 4;
+  for (let by = 0; by < BA; by++) {
+    for (let bx = 0; bx < BL; bx++) {
+      const i = by * BL + bx;
+      const v = forca[i];
+      if (v <= 0) continue;
+      const paleta = paletas[dono[i]];
+      const tom = Math.min(1, v) * DEGRAUS;
+      const base = Math.floor(tom), frac = tom - base;
+      for (let oy = 0; oy < 2; oy++) {
+        const y = by * 2 + oy; if (y >= A) break;
+        for (let ox = 0; ox < 2; ox++) {
+          const x = bx * 2 + ox; if (x >= L) break;
+          const lim = (BAYER[(x & 3) + (y & 3) * 4] + embaralha(x, y, 31) * 5 - 2.5) / 16;
+          const passo = base + (frac > lim ? 1 : 0);
+          if (passo <= 0) continue;                    // franja pontilhada: vira vácuo
+          const cor = paleta[Math.min(DEGRAUS - 1, passo - 1)];
+          const j = (y * L + x) * 4;
+          d[j] = cor[0]; d[j+1] = cor[1]; d[j+2] = cor[2];
+        }
+      }
+    }
+  }
+  fx.putImageData(img, 0, 0);
+
+  // poeira estelar: pontinhos fixos que dão profundidade (não são comestíveis)
+  const r = semente(CFG.SEMENTE + 99);
+  const pontos = Math.round(MUNDO.L * MUNDO.A / 1100);
+  for (let i = 0; i < pontos; i++) {
+    fx.fillStyle = COR.poeira[Math.floor(r() * COR.poeira.length)];
+    fx.fillRect(Math.round(r() * MUNDO.L * escala), Math.round(r() * MUNDO.A * escala), 1, 1);
+  }
+  for (let i = 0; i < pontos / 9; i++) {
+    fx.fillStyle = COR.poeira[2];
+    fx.fillRect(Math.round(r() * MUNDO.L * escala), Math.round(r() * MUNDO.A * escala), 1, 1);
+  }
+  return { escala: escala, canvas: cv };
+}
+
+/* uma camada por degrau de zoom, da mais próxima à mais afastada */
+const CAMADAS = [];
+const N_CAMADAS = 4;
+for (let i = 0; i < N_CAMADAS; i++)
+  CAMADAS.push(pintarNebulosa(1 - (1 - CFG.ZOOM_MIN) * i / (N_CAMADAS - 1)));
+
+/* a menor camada que ainda não precisa ser ampliada */
+function camadaAtual() {
+  let melhor = CAMADAS[CAMADAS.length - 1];
+  for (const c of CAMADAS) if (c.escala >= zoom - 0.001) melhor = c;
+  return melhor;
+}
+
+/* ── sprite da Terra: 8 quadros de rotação, desenhados pixel a pixel ── */
+const TERRA_D = CFG.TERRA_RAIO * 2 + 1;
+const TERRA_QUADROS = 8;
+const terraSprite = document.createElement("canvas");
+terraSprite.width = TERRA_D * TERRA_QUADROS; terraSprite.height = TERRA_D;
+
+function desenharSpriteTerra() {
+  const fx = terraSprite.getContext("2d");
+  const R = CFG.TERRA_RAIO, c = R;
+  // 3 tons por material: o do meio é a cor local, os outros são luz e sombra
+  const oceano = ["#5a9ccc","#7fb9e4","#a3d2f2"];
+  const terra  = ["#3f9e74","#5cbf92","#82d9b0"];
+  const gelo   = ["#d2ecf8","#e8f6ff","#ffffff"];
+  const limbo  = "#3f7ba8";                     // borda mais forte: dá volume à esfera
+
+  for (let q = 0; q < TERRA_QUADROS; q++) {
+    const giro = q * (12 / TERRA_QUADROS);      // continentes deslizando
+    for (let y = 0; y < TERRA_D; y++) {
+      for (let x = 0; x < TERRA_D; x++) {
+        const dx = x - c, dy = y - c;
+        const dist = Math.hypot(dx, dy);
+        if (dist > R + 0.35) continue;
+
+        // luz vindo do alto-esquerda, como no resto do jogo
+        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
+        const tom = luz > 0.68 ? 2 : luz > 0.36 ? 1 : 0;
+
+        let cor;
+        if (dist > R - 0.75) {
+          cor = limbo;                          // fio escuro em toda a volta
+        } else if (Math.abs(dy) > R - 1.6 && Math.abs(dx) < R * 0.5) {
+          cor = gelo[tom];                      // calotas, pequenas e sombreadas
+        } else {
+          // a longitude aparente comprime perto da borda: dá sensação de esfera
+          const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
+          const n = fractal(lon * 3.4 + giro, y * 0.34, CFG.SEMENTE + 5150, 2);
+          cor = n > 0.53 ? terra[tom] : oceano[tom];
+        }
+        fx.fillStyle = cor;
+        fx.fillRect(q * TERRA_D + x, y, 1, 1);
+      }
+    }
+    // brilho especular do oceano no alto-esquerda
+    fx.fillStyle = "#ffffff";
+    fx.fillRect(q * TERRA_D + c - Math.round(R * 0.5), c - Math.round(R * 0.5), 1, 1);
+  }
+}
+desenharSpriteTerra();
+
+/* ── sprite de Io: mesma ideia da Terra, mas em enxofre ──────
+   Io é a lua vulcânica de Júpiter — amarelo-ovo manchado de laranja e de
+   depósitos vermelhos, com uma pluma saindo do limbo. */
+const IO_D = CFG.IO_RAIO * 2 + 1;
+const IO_QUADROS = 8;
+const ioSprite = document.createElement("canvas");
+ioSprite.width = IO_D * IO_QUADROS; ioSprite.height = IO_D;
+
+function desenharSpriteIo() {
+  const fx = ioSprite.getContext("2d");
+  const R = CFG.IO_RAIO, c = R;
+  const enxofre = ["#d9a63c","#f2cf6a","#ffe9a8"];   // o amarelo do corpo
+  const lava    = ["#c4552a","#e8763a","#ff9f45"];   // manchas quentes
+  const escura  = ["#8f4020","#b45a2c","#d6733a"];   // depósitos vermelhos
+  const limbo   = "#a86a24";
+
+  for (let q = 0; q < IO_QUADROS; q++) {
+    const giro = q * (12 / IO_QUADROS);
+    for (let y = 0; y < IO_D; y++) {
+      for (let x = 0; x < IO_D; x++) {
+        const dx = x - c, dy = y - c;
+        const dist = Math.hypot(dx, dy);
+        if (dist > R + 0.35) continue;
+        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
+        const tom = luz > 0.68 ? 2 : luz > 0.36 ? 1 : 0;
+        let cor;
+        if (dist > R - 0.75) {
+          cor = limbo;
+        } else {
+          const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
+          const n = fractal(lon * 3.1 + giro, y * 0.4, CFG.SEMENTE + 7710, 2);
+          cor = n > 0.62 ? lava[tom] : n < 0.41 ? escura[tom] : enxofre[tom];
+        }
+        fx.fillStyle = cor;
+        fx.fillRect(q * IO_D + x, y, 1, 1);
+      }
+    }
+    // pluma: um respingo de vulcão saindo do limbo, girando com o quadro
+    const ap = (q / IO_QUADROS) * Math.PI * 2;
+    for (let k = 1; k <= 3; k++) {
+      fx.fillStyle = k < 3 ? "#ffd166" : "#ffe9a8";
+      fx.fillRect(q * IO_D + Math.round(c + Math.cos(ap) * (R + k * 0.7)),
+                  Math.round(c + Math.sin(ap) * (R + k * 0.7)), 1, 1);
+    }
+  }
+}
+desenharSpriteIo();
+
+/* ── desenho em pixel cheio (sem antialias) ──────────────────── */
+function disco(cx, cy, raio, cor) {
+  ctx.fillStyle = cor;
+  const r = Math.round(raio), x0 = Math.round(cx), y0 = Math.round(cy);
+  for (let dy = -r; dy <= r; dy++) {
+    const larg = Math.floor(Math.sqrt(Math.max(0, r * r - dy * dy)) + 0.5);
+    if (larg <= 0) continue;
+    ctx.fillRect(x0 - larg, y0 + dy, larg * 2 + 1, 1);
+  }
+}
+function oval(cx, cy, rx, ry, cor) {
+  ctx.fillStyle = cor;
+  const x0 = Math.round(cx), y0 = Math.round(cy);
+  const ay = Math.round(ry);
+  for (let dy = -ay; dy <= ay; dy++) {
+    const t = ry > 0 ? 1 - (dy * dy) / (ry * ry) : 1;
+    if (t < 0) continue;
+    const w = Math.round(rx * Math.sqrt(t));
+    ctx.fillRect(x0 - w, y0 + dy, w * 2 + 1, 1);
+  }
+}
+function carimbo(mapa, cx, cy, cor) {          // estampa um desenhinho centrado
+  ctx.fillStyle = cor;
+  const l = mapa[0].length, a = mapa.length;
+  const x0 = Math.round(cx - l / 2), y0 = Math.round(cy - a / 2);
+  for (let y = 0; y < a; y++) {
+    const linha = mapa[y];
+    for (let x = 0; x < l; x++) if (linha[x] === "#") ctx.fillRect(x0 + x, y0 + y, 1, 1);
+  }
+}
+
+/* olhos, bochechas e bocas desenhados à mão em três tamanhos: círculo
+   pequeno feito por fórmula sempre sai quadrado, então aqui vai na régua */
+const OLHOS = [
+  [".##.", "####", "####", "####", ".##."],
+  [".###.", "#####", "#####", "#####", "#####", ".###."],
+  ["..##..", ".####.", "######", "######", "######", "######", ".####.", "..##.."],
+  ["..####..", ".######.", "########", "########", "########",
+   "########", "########", "########", ".######.", "..####.."],
+  ["...###...", "..#####..", ".#######.", "#########", "#########", "#########",
+   "#########", "#########", "#########", ".#######.", "..#####..", "...###..."]
+];
+const BOCHECHAS = [
+  [".##.", "####", ".##."],
+  [".###.", "#####", ".###."],
+  ["..##..", ".####.", "######", ".####."],
+  ["..####..", ".######.", "########", ".######.", "..####.."],
+  ["..#####..", ".#######.", "#########", "#########", ".#######.", "..#####.."]
+];
+const BOCAS = [
+  ["#...#", ".###."],
+  ["#.....#", ".#####."],
+  ["#.......#", ".#.....#", "..#####.."],
+  ["#.........#", ".#.......#", "..#######.."],
+  ["#...........#", ".#.........#", "..#.......#..", "...#######..."]
+];
+const ESTRELAS_SPR = [
+  [".#.", "###", ".#."],
+  ["..#..", ".###.", "#####", ".###.", "..#.."],
+  ["...#...", "..###..", ".#####.", "#######", ".#####.", "..###..", "...#..."],
+  ["...#...", "...#...", "..###..", "#######", "..###..", "...#...", "...#..."],
+  ["....#....", "....#....", "...###...", "..#####..", "#########",
+   "..#####..", "...###...", "....#....", "....#...."]
+];
+const BOCAS_O = [                          // boca de "o" na hora da mordida
+  [".#.", "###", ".#."],
+  [".##.", "####", "####", ".##."],
+  [".###.", "#####", "#####", "#####", ".###."],
+  ["..###..", ".#####.", "#######", "#######", "#######", ".#####.", "..###.."],
+  ["...###...", ".#######.", "#########", "#########", "#########",
+   "#########", "#########", ".#######.", "...###..."]
+];
+const CORACOES = [
+  ["#.#", "###", ".#."],
+  [".#.#.", "#####", "#####", ".###.", "..#.."],
+  [".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."]
+];
+
+function anel(cx, cy, raio, esp, cor) {        // rosca preenchida, sem antialias
+  ctx.fillStyle = cor;
+  const x0 = Math.round(cx), y0 = Math.round(cy);
+  const re = raio, ri = Math.max(0, raio - esp);
+  const R = Math.ceil(re);
+  for (let dy = -R; dy <= R; dy++) {
+    const fe = re * re - dy * dy;
+    if (fe <= 0) continue;
+    const we = Math.floor(Math.sqrt(fe) + 0.5);
+    const fi = ri * ri - dy * dy;
+    const wi = fi > 0 ? Math.floor(Math.sqrt(fi) + 0.5) : -1;
+    if (wi < 0) ctx.fillRect(x0 - we, y0 + dy, we * 2 + 1, 1);
+    else {
+      ctx.fillRect(x0 - we, y0 + dy, we - wi, 1);
+      ctx.fillRect(x0 + wi + 1, y0 + dy, we - wi, 1);
+    }
+  }
+}
+
+function px(x, y, cor) {
+  ctx.fillStyle = cor;
+  ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+}
+function desenhaGlifos(str, x, y, cor, tam) {
+  ctx.fillStyle = cor;
+  let cx = Math.round(x), cy = Math.round(y);
+  for (const ch of str) {
+    const g = glifo(ch);
+    for (let ly = 0; ly < FONTE_H; ly++) {
+      const linha = g.linhas[ly];
+      for (let lx = 0; lx < g.larg; lx++)
+        if (linha[g.c0 + lx] === "#")
+          ctx.fillRect(cx + lx * tam, cy + ly * tam, tam, tam);
+    }
+    cx += (g.larg + VAO) * tam;
+  }
+}
+function texto(str, x, y, cor, tam) {
+  // contorno branco em volta: no céu claro, com estrela preta passando atrás,
+  // uma sombra só de um lado não segura a leitura
+  tam = tam || 1;
+  for (let dx = -1; dx <= 1; dx++)
+    for (let dy = -1; dy <= 1; dy++)
+      if (dx || dy) desenhaGlifos(str, x + dx * tam, y + dy * tam, COR.vazio, tam);
+  desenhaGlifos(str, x, y, cor, tam);
+}
+function larguraTexto(str, tam) {
+  tam = tam || 1;
+  let l = 0;
+  for (const ch of str) l += (glifo(ch).larg + VAO) * tam;
+  return Math.max(0, l - VAO * tam);
+}
+function textoCentro(str, y, cor, tam) {
+  texto(str, Math.round((VL - larguraTexto(str, tam || 1)) / 2), y, cor, tam);
+}
+function caixa(r, corFundo, corBorda) {
+  ctx.fillStyle = corFundo;
+  ctx.fillRect(r.x, r.y, r.l, r.a);
+  ctx.fillStyle = corBorda;
+  ctx.fillRect(r.x, r.y, r.l, 1); ctx.fillRect(r.x, r.y + r.a - 1, r.l, 1);
+  ctx.fillRect(r.x, r.y, 1, r.a); ctx.fillRect(r.x + r.l - 1, r.y, 1, r.a);
+}
+
+/* ── botões (retângulos em pixels do jogo; o toque tem folga extra) ── */
+function botaoJogar() {
+  const l = 90, a = 22;
+  return { x: Math.round((VL - l) / 2), y: Math.round(VA * 0.60), l: l, a: a };
+}
+function botaoSair() { return { x: VL - 16, y: 4, l: 12, a: 12 }; }
+function dentro(gx, gy, r, folga) {
+  folga = folga || 0;
+  return gx >= r.x - folga && gx <= r.x + r.l + folga &&
+         gy >= r.y - folga && gy <= r.y + r.a + folga;
+}
+
+/* ── estado ──────────────────────────────────────────────────── */
+const rnd = semente(CFG.SEMENTE + 4242);
+
+let cena = "menu";                 // "menu" | "jogo"
+const buraco = { x: 0, y: 0, vx: 0, vy: 0, ang: -Math.PI / 2,
+                 nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0, atordoado: 0 };
+
+/* o rival: mesmo bicho, cor azul, cérebro simples */
+const rival = { x: 0, y: 0, vx: 0, vy: 0, ang: 0,
+                nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0, atordoado: 0,
+                alvo: null, pensar: 0 };
+let vencedor = null;
+let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, esperaTerra = 0, turbo = 0;
+let io = null, esperaIo = 0, fogo = 0, flashFogo = 0, recargaFogo = 0, flashQuente = 0;
+let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, arco = 0, quadro = 0;
+let esperaColisao = 0, cadente = null, esperaCadente = 0;
+let cometa = null, esperaCometa = 0, flashGelo = 0;
+let zoom = 1, zoomAlvo = 1, raioTela = CFG.RAIO_BASE;
+const cam = { x: 0, y: 0 };
+
+/* quanto custa sair do nível n: cada nível pede mais que o anterior */
+const custoDoNivel = n => CFG.CUSTO_BASE + n * CFG.CUSTO_PASSO;
+const noMaximo = () => buraco.nivel >= CFG.NIVEL_MAX;
+
+/* o raio do buraco em unidades de MUNDO: cresce mais rápido que o
+   aparente, porque a câmera se afasta na mesma medida */
+const zoomDoNivel = n => Math.max(CFG.ZOOM_MIN, 1 - n * CFG.ZOOM_PASSO);
+const raioTelaNivel = n => CFG.RAIO_BASE + n * CFG.RAIO_TELA_PASSO;
+const raioMundoNivel = n => raioTelaNivel(n) / zoomDoNivel(n);
+const raioMundo = () => raioTela / zoom;
+const visaoL = () => VL / zoom;
+const visaoA = () => VA / zoom;
+
+/* a área jogável é um retângulo centrado que abre conforme o zoom sai */
+function limites() {
+  const l = Math.min(MUNDO.L, visaoL() * CFG.MUNDO_MULT);
+  const a = Math.min(MUNDO.A, visaoA() * CFG.MUNDO_MULT);
+  return { x0: (MUNDO.L - l) / 2, y0: (MUNDO.A - a) / 2,
+           x1: (MUNDO.L + l) / 2, y1: (MUNDO.A + a) / 2, l: l, a: a };
+}
+
+/* quantas estrelas o campo deve ter para a densidade não mudar */
+function alvoEstrelas() {
+  if (!CFG.DENSIDADE_FIXA) return CFG.ESTRELAS;
+  const base = (VL * CFG.MUNDO_MULT) * (VA * CFG.MUNDO_MULT);
+  const agora = limites().l * limites().a;
+  return Math.round(CFG.ESTRELAS * agora / base);
+}
+
+function novaEstrela(longeDe) {
+  const L = limites();
+  for (let tent = 0; tent < 40; tent++) {
+    const e = {
+      x: L.x0 + 6 + rnd() * (L.l - 12),
+      y: L.y0 + 6 + rnd() * (L.a - 12),
+      fase: rnd() * Math.PI * 2,
+      ritmo: 0.05 + rnd() * 0.07,
+      giro: rnd() < 0.5 ? -1 : 1,
+      sx: 0, sy: 0, salc: 1,
+      vx: 0, vy: 0, presa: false
+    };
+    if (!longeDe) return e;
+    if (Math.hypot(e.x - longeDe.x, e.y - longeDe.y) > visaoL() * 0.45) return e;
+  }
+  return { x: L.x0 + L.l * rnd(), y: L.y0 + L.a * rnd(), fase: 0,
+           ritmo: 0.06, giro: rnd() < 0.5 ? -1 : 1, vx: 0, vy: 0, presa: false };
+}
+
+function novaTerra() {
+  const L = limites();
+  for (let tent = 0; tent < 40; tent++) {
+    const t = {
+      x: L.x0 + 20 + rnd() * (L.l - 40),
+      y: L.y0 + 20 + rnd() * (L.a - 40),
+      vx: (rnd() - 0.5) * 0.12, vy: (rnd() - 0.5) * 0.12,
+      quadro: 0
+    };
+    if (Math.hypot(t.x - buraco.x, t.y - buraco.y) > visaoL() * 0.35) return t;
+  }
+  return null;
+}
+
+function novaIo() {
+  const L = limites();
+  for (let tent = 0; tent < 40; tent++) {
+    const t = {
+      x: L.x0 + 20 + rnd() * (L.l - 40),
+      y: L.y0 + 20 + rnd() * (L.a - 40),
+      vx: (rnd() - 0.5) * 0.16, vy: (rnd() - 0.5) * 0.16,
+      quadro: 0
+    };
+    if (Math.hypot(t.x - buraco.x, t.y - buraco.y) > visaoL() * 0.35) return t;
+  }
+  return null;
+}
+
+function reiniciar() {
+  buraco.nivel = 0; buraco.comidas = 0; buraco.progresso = 0;
+  raioTela = CFG.RAIO_BASE; zoom = zoomAlvo = 1;
+  buraco.x = MUNDO.L / 2; buraco.y = MUNDO.A / 2;
+  buraco.vx = buraco.vy = 0; buraco.ang = -Math.PI / 2;
+  buraco.pulso = 0; buraco.boca = 0; buraco.atordoado = 0; aneis = [];
+  faiscas = []; coracoes = []; tremor = 0; flash = 0; flashLado = 0; aberr = 0;
+  arco = 0; turbo = 0; esperaColisao = 0;
+  cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
+  cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashGelo = 0;
+  buraco.gelo = 0; rival.gelo = 0;
+  io = null; esperaIo = CFG.IO_ESPERA;
+  fogo = 0; flashFogo = 0; recargaFogo = 0; flashQuente = 0;
+  estrelas = [];
+  for (let i = 0; i < alvoEstrelas(); i++) estrelas.push(novaEstrela(buraco));
+  rival.nivel = 0; rival.comidas = 0; rival.progresso = 0;
+  rival.vx = rival.vy = 0; rival.ang = Math.PI / 2;
+  rival.pulso = 0; rival.boca = 0; rival.atordoado = 0; rival.alvo = null; rival.pensar = 0;
+  const L0 = limites();
+  rival.x = limitar(buraco.x + visaoL() * 0.42, L0.x0 + 20, L0.x1 - 20);
+  rival.y = limitar(buraco.y + visaoA() * 0.28, L0.y0 + 20, L0.y1 - 20);
+  vencedor = null; flashTerra = 0;
+
+  terra = novaTerra(); esperaTerra = 0;
+  cam.x = buraco.x - visaoL() / 2;
+  cam.y = buraco.y - visaoA() / 2;
+}
+reiniciar();
+
+/* ── controle ────────────────────────────────────────────────── */
+const toque = { ativo: false, ax: 0, ay: 0, x: 0, y: 0, id: null };
+const teclas = Object.create(null);
+
+function jogar() { reiniciar(); cena = "jogo"; }
+function sair()  { toque.ativo = false; toque.id = null; cena = "menu"; reiniciar(); }
+
+tela.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  const gx = e.clientX / escala, gy = e.clientY / escala;
+
+  if (cena === "menu") {
+    if (dentro(gx, gy, botaoJogar(), 6)) jogar();
+    return;
+  }
+  if (cena === "fim") {
+    if (dentro(gx, gy, botaoJogar(), 6)) jogar();
+    else if (dentro(gx, gy, botaoSair(), 8)) sair();
+    return;
+  }
+  if (dentro(gx, gy, botaoSair(), 8)) { sair(); return; }
+
+  if (toque.id !== null) return;
+  tela.setPointerCapture(e.pointerId);
+  toque.ativo = true; toque.id = e.pointerId;
+  toque.ax = e.clientX; toque.ay = e.clientY;
+  toque.x = e.clientX;  toque.y = e.clientY;
+});
+tela.addEventListener("pointermove", e => {
+  if (!toque.ativo || e.pointerId !== toque.id) return;
+  e.preventDefault();
+  toque.x = e.clientX; toque.y = e.clientY;
+  // o centro do analógico segue o dedo quando ele passa do alcance
+  const dx = toque.x - toque.ax, dy = toque.y - toque.ay;
+  const d = Math.hypot(dx, dy), lim = CFG.RAIO_ANALOG * escala;
+  if (d > lim) {
+    toque.ax = toque.x - (dx / d) * lim;
+    toque.ay = toque.y - (dy / d) * lim;
+  }
+});
+for (const ev of ["pointerup", "pointercancel"])
+  tela.addEventListener(ev, e => {
+    if (e.pointerId === toque.id) { toque.ativo = false; toque.id = null; }
+  });
+
+window.addEventListener("keydown", e => {
+  teclas[e.key] = true;
+  if ((cena === "menu" || cena === "fim") && (e.key === "Enter" || e.key === " ")) jogar();
+  else if (e.key === "Escape") sair();
+});
+window.addEventListener("keyup", e => { teclas[e.key] = false; });
+
+/* ── lógica ──────────────────────────────────────────────────── */
+function velMaxTela() {
+  const base = Math.max(0.9, CFG.VEL_MAX - buraco.nivel * CFG.VEL_PERDA);
+  const gelado = buraco.gelo > 0 ? CFG.COMETA_FREIO : 1;
+  return (turbo > 0 ? base * CFG.TERRA_FATOR : base) * gelado;
+}
+
+/* O rival: escolhe o alvo mais próximo de tempos em tempos e vai atrás.
+   A mira tem erro de propósito — sem isso ele é perfeito e chato. */
+function passoRival(L) {
+  const rm = raioMundoNivel(rival.nivel);
+  const zr = zoomDoNivel(rival.nivel);
+
+  const vivo = rival.alvo && (rival.alvo === terra || estrelas.indexOf(rival.alvo) >= 0);
+  if (--rival.pensar <= 0 || !vivo) {
+    rival.pensar = CFG.RIVAL_PENSAR + Math.floor(Math.random() * CFG.RIVAL_PENSAR);
+    let melhor = null, md = Infinity;
+    for (const e of estrelas) {
+      const d = Math.hypot(e.x - rival.x, e.y - rival.y);
+      if (d < md) { md = d; melhor = e; }
+    }
+    if (terra && Math.hypot(terra.x - rival.x, terra.y - rival.y) < md * 1.3) melhor = terra;
+    rival.alvo = melhor;
+  }
+  if (rival.alvo) {
+    const dx = rival.alvo.x - rival.x, dy = rival.alvo.y - rival.y;
+    rival.ang = Math.atan2(dy, dx) + (Math.random() - 0.5) * CFG.RIVAL_MIRA;
+  }
+
+  const zonzo = rival.atordoado > 0;
+  if (zonzo) rival.atordoado--;
+  const gelado = rival.gelo > 0 ? CFG.COMETA_FREIO : 1;
+  const acel = (zonzo ? 0 : CFG.ACEL * CFG.RIVAL_FORCA * gelado) / zr;
+  const atrito = zonzo ? CFG.COLISAO_ARRASTO : CFG.ATRITO;
+  rival.vx = (rival.vx + Math.cos(rival.ang) * acel) * atrito;
+  rival.vy = (rival.vy + Math.sin(rival.ang) * acel) * atrito;
+  const vm = Math.max(0.9, CFG.VEL_MAX - rival.nivel * CFG.VEL_PERDA) * CFG.RIVAL_FORCA * gelado / zr;
+  const v = Math.hypot(rival.vx, rival.vy);
+  if (!zonzo && v > vm) { rival.vx = rival.vx / v * vm; rival.vy = rival.vy / v * vm; }
+  rival.x += rival.vx; rival.y += rival.vy;
+
+  const m = rm + 1;
+  if (rival.x < L.x0 + m) { rival.x = L.x0 + m; rival.vx = Math.abs(rival.vx); }
+  if (rival.y < L.y0 + m) { rival.y = L.y0 + m; rival.vy = Math.abs(rival.vy); }
+  if (rival.x > L.x1 - m) { rival.x = L.x1 - m; rival.vx = -Math.abs(rival.vx); }
+  if (rival.y > L.y1 - m) { rival.y = L.y1 - m; rival.vy = -Math.abs(rival.vy); }
+
+  // trombada: os dois se arremessam, e o menor perde massa
+  const dx = rival.x - buraco.x, dy = rival.y - buraco.y;
+  const d = Math.hypot(dx, dy) || 0.001;
+  const minimo = rm + raioMundo();
+  if (d < minimo) {
+    const ux = dx / d, uy = dy / d;
+    const folga = (minimo - d) / 2 + 1;
+    rival.x += ux * folga;  rival.y += uy * folga;
+    buraco.x -= ux * folga; buraco.y -= uy * folga;
+    if (cena === "jogo" && esperaColisao <= 0) trombada(ux, uy);
+  }
+}
+
+/* Encostou: os dois voam para lados opostos, a tela sacode forte, as cores
+   se separam, e quem tem menos estrelas larga um punhado delas no campo. */
+function trombada(ux, uy) {
+  esperaColisao = CFG.COLISAO_ESPERA;
+  const emp = CFG.COLISAO_EMPURRAO / zoom;
+  buraco.vx = -ux * emp; buraco.vy = -uy * emp;
+  rival.vx  =  ux * emp; rival.vy  =  uy * emp;
+  buraco.atordoado = rival.atordoado = CFG.COLISAO_ATORDOA;
+  buraco.pulso = 1; rival.pulso = 1;
+  rival.alvo = null;                     // ele reavalia depois de levar o tranco
+
+  tremor = CFG.COLISAO_TREMOR;
+  aberr = CFG.COLISAO_ABERR;
+  flashLado = 30;
+
+  const mx = (buraco.x + rival.x) / 2, my = (buraco.y + rival.y) / 2;
+  faiscar(mx, my, 34, 2, 8);
+  aneis.push({ x: mx, y: my, r: 4, vida: 22, total: 22, rival: false });
+
+  const perdedor = buraco.comidas <= rival.comidas ? buraco : rival;
+  const quantas = Math.min(CFG.COLISAO_ESTRELAS, perdedor.comidas);
+  if (quantas <= 0) return;
+  perderEstrelas(perdedor, quantas);
+  for (let k = 0; k < quantas; k++) estrelas.push(estrelaSolta(perdedor, k, quantas));
+}
+
+/* as estrelas perdidas voltam para o campo, espalhadas em volta do perdedor */
+function estrelaSolta(de, k, total) {
+  const L = limites();
+  const e = novaEstrela(null);
+  const a = (k / total) * Math.PI * 2 + Math.random() * 0.5;
+  // caem além do alcance de sucção dele: senão o perdedor reabsorve na hora
+  const raio = raioMundoNivel(de.nivel) * CFG.ALCANCE_SUCCAO * (1.1 + Math.random() * 0.55);
+  e.x = limitar(de.x + Math.cos(a) * raio, L.x0 + 4, L.x1 - 4);
+  e.y = limitar(de.y + Math.sin(a) * raio, L.y0 + 4, L.y1 - 4);
+  const v = (0.5 + Math.random() * 1.1) / zoom;
+  e.vx = Math.cos(a) * v; e.vy = Math.sin(a) * v;
+  e.presa = false;
+  return e;
+}
+
+/* Uma estrela cadente atravessa o mapa de tempos em tempos. Quem encostar
+   nela leva um punhado de estrelas de uma vez. */
+/* O sentido é sorteado, mas o caminho passa perto de quem está jogando:
+   ela nasce numa ponta do mapa, cruza o cenário à vista e sai pela outra.
+   Sorteando só um ponto de partida, ela costumava riscar um canto vazio. */
+function novaCadente() {
+  const L = limites();
+  const a = Math.random() * Math.PI * 2;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  // ponto de travessia: perto do jogador, com uma folga para não ser sempre igual
+  const px0 = limitar(buraco.x + (Math.random() - 0.5) * visaoL() * 0.55, L.x0 + 6, L.x1 - 6);
+  const py0 = limitar(buraco.y + (Math.random() - 0.5) * visaoA() * 0.55, L.y0 + 6, L.y1 - 6);
+  // recua desse ponto, no sentido contrário, até encostar na borda do mapa
+  let t = Infinity;
+  if (Math.abs(ca) > 1e-4) t = Math.min(t, ca > 0 ? (px0 - L.x0) / ca : (L.x1 - px0) / -ca);
+  if (Math.abs(sa) > 1e-4) t = Math.min(t, sa > 0 ? (py0 - L.y0) / sa : (L.y1 - py0) / -sa);
+  t = Math.max(0, t - 4);
+  const v = CFG.CADENTE_VEL / zoom;
+  return { x: px0 - ca * t, y: py0 - sa * t,
+           vx: ca * v, vy: sa * v,
+           vida: 1800, rastro: [] };
+}
+
+function passoCadente(L) {
+  if (!cadente) {
+    if (--esperaCadente <= 0) { cadente = novaCadente(); esperaCadente = CFG.CADENTE_INTERVALO; }
+    return;
+  }
+  cadente.rastro.unshift({ x: cadente.x, y: cadente.y });
+  if (cadente.rastro.length > 14) cadente.rastro.pop();
+  cadente.x += cadente.vx; cadente.y += cadente.vy;
+  cadente.vida--;
+
+  const rc = CFG.CADENTE_RAIO / zoom;
+  for (const p of [buraco, rival]) {
+    const rp = p === buraco ? raioMundo() : raioMundoNivel(p.nivel);
+    if (Math.hypot(cadente.x - p.x, cadente.y - p.y) < rp + rc) {
+      faiscar(cadente.x, cadente.y, 30, 3, 8);
+      for (let k = 0; k < 26; k++) {
+        const a = Math.random() * Math.PI * 2, v = (0.7 + Math.random()) / zoom;
+        faiscas.push({ x: cadente.x, y: cadente.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                       vida: 18 + Math.floor(Math.random() * 14), arrasto: 0.97, tipo: "raio",
+                       cor: COR.cadente[Math.floor(Math.random() * COR.cadente.length)] });
+      }
+      p.pulso = 1; p.boca = 22;
+      if (p === buraco) { tremor = 16; aberr = CFG.ABERRACAO; soltarCoracoes(p.x, p.y, 18, 1.8, 1); }
+      ganharEstrelas(p, CFG.CADENTE_PREMIO);
+      cadente = null;
+      return;
+    }
+  }
+
+  const fora = 60 / zoom;
+  if (cadente.vida <= 0 ||
+      cadente.x < L.x0 - fora || cadente.x > L.x1 + fora ||
+      cadente.y < L.y0 - fora || cadente.y > L.y1 + fora) cadente = null;
+}
+
+/* O cometa usa a mesma travessia da estrela cadente — nasce numa ponta do
+   mapa e cruza o cenário à vista — mas ele é o perigo: quem encostar fica
+   congelado e anda mais devagar por um tempo. Vem mais devagar de propósito,
+   para dar tempo de ler a trajetória e desviar. */
+function novaCometa() {
+  const L = limites();
+  const a = Math.random() * Math.PI * 2;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const cx0 = limitar(buraco.x + (Math.random() - 0.5) * visaoL() * 0.5, L.x0 + 6, L.x1 - 6);
+  const cy0 = limitar(buraco.y + (Math.random() - 0.5) * visaoA() * 0.5, L.y0 + 6, L.y1 - 6);
+  let t = Infinity;
+  if (Math.abs(ca) > 1e-4) t = Math.min(t, ca > 0 ? (cx0 - L.x0) / ca : (L.x1 - cx0) / -ca);
+  if (Math.abs(sa) > 1e-4) t = Math.min(t, sa > 0 ? (cy0 - L.y0) / sa : (L.y1 - cy0) / -sa);
+  t = Math.max(0, t - 4);
+  const v = CFG.COMETA_VEL / zoom;
+  return { x: cx0 - ca * t, y: cy0 - sa * t,
+           vx: ca * v, vy: sa * v,
+           vida: 2400, rastro: [] };
+}
+
+function passoCometa(L) {
+  if (!cometa) {
+    if (--esperaCometa <= 0) { cometa = novaCometa(); esperaCometa = CFG.COMETA_INTERVALO; }
+    return;
+  }
+  cometa.rastro.unshift({ x: cometa.x, y: cometa.y });
+  if (cometa.rastro.length > CFG.COMETA_RABO) cometa.rastro.pop();
+  cometa.x += cometa.vx; cometa.y += cometa.vy;
+  cometa.vida--;
+  if (quadro % 3 === 0) gelar(cometa.x, cometa.y, 1, 0.5);   // pó de gelo caindo do rabo
+
+  const rc = CFG.COMETA_RAIO / zoom;
+  for (const p of [buraco, rival]) {
+    const rp = p === buraco ? raioMundo() : raioMundoNivel(p.nivel);
+    if (Math.hypot(cometa.x - p.x, cometa.y - p.y) < rp + rc) {
+      congelar(p);
+      cometa = null;
+      return;
+    }
+  }
+
+  const fora = 60 / zoom;
+  if (cometa.vida <= 0 ||
+      cometa.x < L.x0 - fora || cometa.x > L.x1 + fora ||
+      cometa.y < L.y0 - fora || cometa.y > L.y1 + fora) cometa = null;
+}
+
+function congelar(p) {
+  p.gelo = CFG.COMETA_GELO;
+  p.pulso = 1; p.boca = 24;
+  gelar(p.x, p.y, 30, 1.6);
+  aneis.push({ x: p.x, y: p.y, r: 3, vida: 20, total: 20, rival: p === rival });
+  // a pancada também freia na hora: senão o congelamento demora a ser sentido
+  p.vx *= 0.4; p.vy *= 0.4;
+  if (p !== buraco) return;
+  tremor = 18;
+  aberr = CFG.ABERRACAO;
+  flashGelo = 26;
+}
+
+/* lascas de gelo: brancas por fora, azuis no miolo */
+function gelar(x, y, quantas, forca) {
+  for (let k = 0; k < quantas; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const v = (0.3 + Math.random() * 1.2) * forca / zoom;
+    faiscas.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                   vida: 20 + Math.floor(Math.random() * 20), arrasto: 0.95,
+                   tipo: "gelo", cor: COR.cometa[1 + Math.floor(Math.random() * 3)] });
+  }
+}
+
+function terminar(quem) {
+  vencedor = quem;
+  cena = "fim";
+  tremor = 14;
+  soltarCoracoes(buraco.x, buraco.y, 40, 2.4, 1);
+}
+
+function passo() {
+  quadro++;
+  if (cena === "fim") {           // congela a partida, deixa a festa correr
+    passoParticulas();
+    return;
+  }
+
+  /* — direção — */
+  let acelerando = false;
+  if (cena === "menu") {
+    // no menu ele fica parado, esperando: só o disco de acreção gira
+    buraco.vx = buraco.vy = 0;
+  } else {
+    if (toque.ativo) {
+      const dx = toque.x - toque.ax, dy = toque.y - toque.ay;
+      if (Math.hypot(dx, dy) > CFG.ZONA_MORTA) buraco.ang = Math.atan2(dy, dx);
+      acelerando = true;
+    }
+    let tx = 0, ty = 0;
+    if (teclas.ArrowLeft  || teclas.a || teclas.A) tx -= 1;
+    if (teclas.ArrowRight || teclas.d || teclas.D) tx += 1;
+    if (teclas.ArrowUp    || teclas.w || teclas.W) ty -= 1;
+    if (teclas.ArrowDown  || teclas.s || teclas.S) ty += 1;
+    if (tx || ty) { buraco.ang = Math.atan2(ty, tx); acelerando = true; }
+  }
+
+  /* — movimento: tudo é pensado em pixels de tela e convertido pelo zoom,
+       para a sensação de velocidade não mudar quando a câmera se afasta — */
+  // depois da pancada ele fica um tempo sem comando e sem teto de velocidade:
+  // é o que faz os dois realmente se afastarem, em vez de grudarem de novo
+  const zonzo = buraco.atordoado > 0;
+  if (zonzo) { buraco.atordoado--; acelerando = false; }
+  const fator = (turbo > 0 ? CFG.TERRA_FATOR : 1) *
+                (buraco.gelo > 0 ? CFG.COMETA_FREIO : 1);
+  const acel = (acelerando ? CFG.ACEL * fator : 0) / zoom;
+  const atrito = zonzo ? CFG.COLISAO_ARRASTO : CFG.ATRITO;
+  buraco.vx = (buraco.vx + Math.cos(buraco.ang) * acel) * atrito;
+  buraco.vy = (buraco.vy + Math.sin(buraco.ang) * acel) * atrito;
+  const v = Math.hypot(buraco.vx, buraco.vy), vm = velMaxTela() / zoom;
+  if (!zonzo && v > vm) { buraco.vx = buraco.vx / v * vm; buraco.vy = buraco.vy / v * vm; }
+  buraco.x += buraco.vx; buraco.y += buraco.vy;
+  if (turbo > 0) turbo--;
+
+  /* — beirada do universo — */
+  const L = limites(), m = raioMundo() + 1;
+  if (buraco.x < L.x0 + m) { buraco.x = L.x0 + m; buraco.vx *= -0.35; }
+  if (buraco.y < L.y0 + m) { buraco.y = L.y0 + m; buraco.vy *= -0.35; }
+  if (buraco.x > L.x1 - m) { buraco.x = L.x1 - m; buraco.vx *= -0.35; }
+  if (buraco.y > L.y1 - m) { buraco.y = L.y1 - m; buraco.vy *= -0.35; }
+
+  passoRival(L);
+  passoCadente(L);
+  passoCometa(L);
+
+  /* — crescimento suave do raio e do afastamento da câmera — */
+  const raioAlvo = CFG.RAIO_BASE + buraco.nivel * CFG.RAIO_TELA_PASSO;
+  zoomAlvo = Math.max(CFG.ZOOM_MIN, 1 - buraco.nivel * CFG.ZOOM_PASSO);
+  raioTela += (raioAlvo - raioTela) * 0.08;
+  zoom += (zoomAlvo - zoom) * 0.05;
+
+  /* — o campo repõe estrelas conforme o universo abre — */
+  const alvo = alvoEstrelas();
+  if (estrelas.length < alvo) estrelas.push(novaEstrela(buraco));
+
+  /* — estrelas: os dois disputam; ganha quem estiver proporcionalmente
+       mais perto, medindo pelo próprio alcance de cada um — */
+  const sugadores = [
+    { quem: buraco, x: buraco.x, y: buraco.y, rm: raioMundo() },
+    { quem: rival,  x: rival.x,  y: rival.y,  rm: raioMundoNivel(rival.nivel) }
+  ];
+  for (const g of sugadores) g.alc = g.rm * CFG.ALCANCE_SUCCAO;
+
+  for (let i = estrelas.length - 1; i >= 0; i--) {
+    const e = estrelas[i];
+    e.fase += e.ritmo;
+
+    let dono = null, melhor = Infinity, dDono = 0;
+    for (const g of sugadores) {
+      const d = Math.hypot(g.x - e.x, g.y - e.y) || 0.001;
+      const rel = d / g.alc;
+      if (rel < melhor) { melhor = rel; dono = g; dDono = d; }
+    }
+
+    if (melhor < 1) {
+      e.presa = true;
+      e.sx = dono.x; e.sy = dono.y; e.salc = dono.alc;
+      const dx = dono.x - e.x, dy = dono.y - e.y, d = dDono;
+      const forca = (CFG.FORCA_SUCCAO * (1 - melhor) + 0.02) / zoom;
+      e.vx += (dx / d) * forca; e.vy += (dy / d) * forca;
+      // gira a estrela em torno do sugador: o mergulho vira espiral.
+      // É um giro do POSICIONAMENTO, não uma força lateral — força lateral
+      // alimenta a órbita e a estrela nunca cai (foi o que aconteceu antes).
+      const ang = 0.055 * CFG.GIRO_SUCCAO * (1 - melhor) * e.giro;
+      const co = Math.cos(ang), si = Math.sin(ang);
+      const rx = e.x - dono.x, ry = e.y - dono.y;
+      e.x = dono.x + rx * co - ry * si;
+      e.y = dono.y + rx * si + ry * co;
+      const wx = e.vx, wy = e.vy;
+      e.vx = wx * co - wy * si; e.vy = wx * si + wy * co;
+    } else if (e.presa) { e.presa = false; e.vx *= 0.9; e.vy *= 0.9; }
+
+    e.x += e.vx; e.y += e.vy; e.vx *= 0.985; e.vy *= 0.985;
+    if (e.x < L.x0 + 2 || e.x > L.x1 - 2) { e.vx *= -0.6; e.x = limitar(e.x, L.x0 + 2, L.x1 - 2); }
+    if (e.y < L.y0 + 2 || e.y > L.y1 - 2) { e.vy *= -0.6; e.y = limitar(e.y, L.y0 + 2, L.y1 - 2); }
+    if (dono && dDono < dono.rm * 0.85) engolirEstrela(i, dono.quem);
+  }
+
+  /* — a Terra — */
+  if (terra) {
+    terra.quadro++;
+    terra.x += terra.vx / zoom; terra.y += terra.vy / zoom;
+    const rt = CFG.TERRA_RAIO / zoom;
+    if (terra.x < L.x0 + rt || terra.x > L.x1 - rt) terra.vx *= -1;
+    if (terra.y < L.y0 + rt || terra.y > L.y1 - rt) terra.vy *= -1;
+    terra.x = limitar(terra.x, L.x0 + rt, L.x1 - rt);
+    terra.y = limitar(terra.y, L.y0 + rt, L.y1 - rt);
+    if (Math.hypot(terra.x - buraco.x, terra.y - buraco.y) < raioMundo() + rt * 0.4)
+      engolirTerra(buraco);
+    else if (Math.hypot(terra.x - rival.x, terra.y - rival.y) < raioMundoNivel(rival.nivel) + rt * 0.4)
+      engolirTerra(rival);
+  } else if (--esperaTerra <= 0) {
+    terra = novaTerra();
+  }
+
+  /* — Io — */
+  if (io) {
+    io.quadro++;
+    io.x += io.vx / zoom; io.y += io.vy / zoom;
+    const ri = CFG.IO_RAIO / zoom;
+    if (io.x < L.x0 + ri || io.x > L.x1 - ri) io.vx *= -1;
+    if (io.y < L.y0 + ri || io.y > L.y1 - ri) io.vy *= -1;
+    io.x = limitar(io.x, L.x0 + ri, L.x1 - ri);
+    io.y = limitar(io.y, L.y0 + ri, L.y1 - ri);
+    // só o jogador a pega: se o rival pudesse engoli-la sem ganhar nada,
+    // o poder sumiria do mapa à toa
+    if (Math.hypot(io.x - buraco.x, io.y - buraco.y) < raioMundo() + ri * 0.4)
+      engolirIo(buraco);
+  } else if (--esperaIo <= 0) {
+    io = novaIo();
+  }
+
+  /* — as labaredas queimam o rival enquanto o poder dura — */
+  if (fogo > 0) {
+    fogo--;
+    if (recargaFogo > 0) recargaFogo--;
+    const d = Math.hypot(rival.x - buraco.x, rival.y - buraco.y);
+    if (recargaFogo <= 0 &&
+        d < raioMundo() * CFG.IO_ALCANCE + raioMundoNivel(rival.nivel)) queimar();
+  }
+
+  passoParticulas();
+
+  /* — câmera — */
+  const alvoX = limitar(buraco.x - visaoL() / 2, L.x0, L.x1 - visaoL());
+  const alvoY = limitar(buraco.y - visaoA() / 2, L.y0, L.y1 - visaoA());
+  cam.x += (alvoX - cam.x) * 0.12;
+  cam.y += (alvoY - cam.y) * 0.12;
+  cam.x = limitar(cam.x, 0, MUNDO.L - visaoL());
+  cam.y = limitar(cam.y, 0, MUNDO.A - visaoA());
+}
+
+function passoParticulas() {
+  for (let i = faiscas.length - 1; i >= 0; i--) {
+    const f = faiscas[i];
+    const ar = f.arrasto || 0.9;
+    f.x += f.vx; f.y += f.vy; f.vx *= ar; f.vy *= ar; f.vida--;
+    if (f.vida <= 0) faiscas.splice(i, 1);
+  }
+
+  for (let i = coracoes.length - 1; i >= 0; i--) {
+    const c = coracoes[i];
+    c.x += c.vx + Math.sin(c.fase + quadro * 0.09) * 0.14 / zoom;   // bambeia
+    c.y += c.vy;
+    c.vy -= 0.005 / zoom;                                           // sobem
+    c.vx *= 0.985;
+    if (--c.vida <= 0) coracoes.splice(i, 1);
+  }
+
+  for (let i = aneis.length - 1; i >= 0; i--) {
+    const a = aneis[i];
+    a.r += 1.1 / zoom;
+    if (--a.vida <= 0) aneis.splice(i, 1);
+  }
+  buraco.pulso *= 0.85; rival.pulso *= 0.85;
+  if (buraco.boca > 0) buraco.boca--;
+  if (rival.boca > 0) rival.boca--;
+  if (flashTerra > 0) flashTerra--;
+  if (flashFogo > 0) flashFogo--;
+  if (flashGelo > 0) flashGelo--;
+  if (buraco.gelo > 0) {
+    buraco.gelo--;
+    if (quadro % 4 === 0) gelar(buraco.x, buraco.y, 1, 0.5);   // lascas caindo
+  }
+  if (rival.gelo > 0) {
+    rival.gelo--;
+    if (quadro % 6 === 0) gelar(rival.x, rival.y, 1, 0.5);
+  }
+  if (flashQuente > 0) flashQuente--;
+  if (turbo > 0) { raiarTurbo(); if (quadro % 2 === 0) raiarTurbo(); }
+  if (fogo > 0) {
+    irromper(); irromper(); irromper();
+    if (quadro % 2 === 0) irromper();
+    // aberração baixa e constante: o fogo desalinha a imagem o tempo todo
+    aberr = Math.max(aberr, Math.round(CFG.ABERRACAO * 0.4));
+    // e de vez em quando um estalo quente nas laterais
+    if (Math.random() < 0.07) flashQuente = Math.max(flashQuente, 10 + Math.random() * 12);
+  }
+
+  if (tremor > 0) tremor *= 0.9;
+  if (flash > 0) flash--;
+  if (flashLado > 0) flashLado--;
+  if (aberr > 0) aberr--;
+  if (arco > 0) arco--;
+  if (esperaColisao > 0) esperaColisao--;
+}
+
+/* Labaredas: pontos quentes atirados para fora a partir de um ponto.
+   Cada uma escolhe a cor pela idade, então esfriam de amarelo para vermelho. */
+function labaredar(x, y, quantas) {
+  for (let k = 0; k < quantas; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const v = (0.7 + Math.random() * 1.5) / zoom;
+    faiscas.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                   vida: 14 + Math.floor(Math.random() * 12), arrasto: 0.94,
+                   tipo: "chama", cor: COR.fogo[2 + Math.floor(Math.random() * 3)] });
+  }
+}
+
+/* erupção contínua: as labaredas nascem na borda do corpo e vão até o
+   alcance do poder, para o que se vê bater com o que machuca */
+function irromper() {
+  const r = raioMundo();
+  const a = Math.random() * Math.PI * 2;
+  const alc = r * (CFG.IO_ALCANCE - 1) * (0.7 + Math.random() * 0.6);
+  const vida = 15 + Math.floor(Math.random() * 10);
+  const v = alc / vida * 2.2;                    // com o arrasto, chega perto do alcance
+  faiscas.push({ x: buraco.x + Math.cos(a) * r * 0.9,
+                 y: buraco.y + Math.sin(a) * r * 0.9,
+                 vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                 vida: vida, arrasto: 0.93, tipo: "chama",
+                 cor: COR.fogo[2 + Math.floor(Math.random() * 3)] });
+}
+
+/* raios azuis e dourados saindo de dentro do personagem enquanto o turbo dura */
+function raiarTurbo() {
+  const a = Math.random() * Math.PI * 2;
+  const v = (0.8 + Math.random() * 1.1) / zoom;
+  faiscas.push({ x: buraco.x, y: buraco.y,
+                 vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                 vida: 16 + Math.floor(Math.random() * 14), arrasto: 0.975, tipo: "raio",
+                 cor: COR.turboPart[Math.floor(Math.random() * COR.turboPart.length)] });
+}
+
+function faiscar(x, y, quantas, dei, dfi) {
+  for (let k = 0; k < quantas; k++) {
+    const a = Math.random() * Math.PI * 2, s = (0.4 + Math.random() * 1.1) / zoom;
+    faiscas.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+                   vida: 10 + Math.floor(Math.random() * 12),
+                   cor: COR.disco[dei + Math.floor(Math.random() * (dfi - dei))] });
+  }
+}
+
+function soltarCoracoes(x, y, quantos, forca, tamMin) {
+  for (let k = 0; k < quantos; k++) {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.7;
+    const vel = (0.35 + Math.random() * 0.85) * (forca || 1) / zoom;
+    const vida = 42 + Math.floor(Math.random() * 34);
+    coracoes.push({ x: x, y: y, vx: Math.cos(a) * vel, vy: Math.sin(a) * vel,
+                    vida: vida, total: vida,
+                    tam: Math.min(CORACOES.length - 1,
+                                  (tamMin || 0) + (Math.random() < 0.55 ? 0 : 1)),
+                    fase: Math.random() * Math.PI * 2 });
+  }
+}
+
+/* Um caminho só para ganhar estrelas: a estrela engolida, o prêmio da
+   cadente. Sobe quantos níveis for preciso. */
+function ganharEstrelas(dono, n) {
+  dono.comidas += n;
+  if (dono.nivel >= CFG.NIVEL_MAX) return;
+  dono.progresso += n;
+  while (dono.progresso >= custoDoNivel(dono.nivel)) {
+    dono.progresso -= custoDoNivel(dono.nivel);
+    dono.nivel++;
+    subiuDeNivel(dono);
+    if (dono.nivel >= CFG.NIVEL_MAX) { dono.progresso = 0; terminar(dono); return; }
+  }
+}
+
+function subiuDeNivel(dono) {
+  if (dono === buraco) {
+    tremor = 22; flash = CFG.ARCO; flashLado = 36;
+    aberr = CFG.ABERRACAO; arco = CFG.ARCO;
+    soltarCoracoes(buraco.x, buraco.y, 34, 2.1, 1);   // chuva de corações
+  } else {
+    soltarCoracoes(rival.x, rival.y, 8, 1.2, 0);
+  }
+}
+
+/* Perder massa: sai do contador e volta do progresso, devolvendo nível se
+   preciso — senão a trombada seria só um número piscando. */
+function perderEstrelas(dono, n) {
+  dono.comidas = Math.max(0, dono.comidas - n);
+  if (!CFG.COLISAO_CUSTA_NIVEL) return;
+  let resta = n;
+  while (resta > 0) {
+    if (dono.progresso > 0) {
+      const tira = Math.min(dono.progresso, resta);
+      dono.progresso -= tira; resta -= tira;
+    } else if (dono.nivel > 0) {
+      dono.nivel--;
+      dono.progresso = custoDoNivel(dono.nivel);
+    } else break;
+  }
+}
+
+function engolirEstrela(indice, dono) {
+  const e = estrelas[indice];
+  faiscar(e.x, e.y, 11, 3, 8);
+  estrelas.splice(indice, 1);
+  if (cena !== "jogo") return;          // no menu ele come só de enfeite
+  dono.pulso = 1; dono.boca = 18;
+  aneis.push({ x: e.x, y: e.y, r: 2, vida: 15, total: 15, rival: dono === rival });
+  if (dono === buraco && Math.random() < 0.28) soltarCoracoes(e.x, e.y, 1, 0.7, 0);
+  ganharEstrelas(dono, 1);
+}
+
+function engolirTerra(dono) {
+  faiscar(terra.x, terra.y, 18, 2, 8);
+  terra = null;
+  esperaTerra = CFG.TERRA_ESPERA;
+  if (cena !== "jogo") return;
+  dono.pulso = 1; dono.boca = 20;
+  if (dono !== buraco) return;                  // o rival só engole, não turbina
+  turbo = CFG.TERRA_TURBO;
+  tremor = 7;
+  flashTerra = CFG.TERRA_CLARAO;
+  for (let k = 0; k < 30; k++) raiarTurbo();
+  soltarCoracoes(buraco.x, buraco.y, 8, 1.1, 0);
+}
+
+function engolirIo(dono) {
+  labaredar(io.x, io.y, 22);
+  io = null;
+  esperaIo = CFG.IO_ESPERA;
+  if (cena !== "jogo") return;
+  dono.pulso = 1; dono.boca = 20;
+  fogo = CFG.IO_FOGO;
+  recargaFogo = 0;
+  tremor = 12;
+  aberr = CFG.ABERRACAO;
+  flashFogo = CFG.IO_CLARAO;
+  flashQuente = 34;
+  for (let k = 0; k < 34; k++) labaredar(buraco.x, buraco.y, 1);
+}
+
+/* Uma labareda encosta no rival: ele perde massa e leva um empurrãozinho.
+   A recarga evita que 10 segundos colados virem 600 hits. */
+function queimar() {
+  recargaFogo = CFG.IO_RECARGA;
+  const quantas = Math.min(CFG.IO_DANO, rival.comidas);
+  if (quantas > 0) perderEstrelas(rival, quantas);
+  rival.pulso = 1; rival.boca = 16;
+  tremor = Math.max(tremor, 9);
+  aberr = Math.max(aberr, Math.round(CFG.ABERRACAO * 0.7));
+  flashQuente = Math.max(flashQuente, 20);
+  labaredar(rival.x, rival.y, 16);
+  aneis.push({ x: rival.x, y: rival.y, r: 3, vida: 16, total: 16, rival: true });
+  // um tranquinho para o rival não ficar grudado apanhando
+  const dx = rival.x - buraco.x, dy = rival.y - buraco.y;
+  const m = Math.hypot(dx, dy) || 1;
+  rival.vx += dx / m * 1.6 / zoom; rival.vy += dy / m * 1.6 / zoom;
+}
+
+/* ── desenho ─────────────────────────────────────────────────── */
+const paraTelaX = wx => (wx - cam.x) * zoom;
+const paraTelaY = wy => (wy - cam.y) * zoom;
+
+function desenharMundo() {
+  const sx0 = tremor > 0.3 ? (Math.random() - 0.5) * tremor / zoom : 0;
+  const sy0 = tremor > 0.3 ? (Math.random() - 0.5) * tremor / zoom : 0;
+  const cx = limitar(cam.x + sx0, 0, MUNDO.L - visaoL());
+  const cy = limitar(cam.y + sy0, 0, MUNDO.A - visaoA());
+
+  ctx.fillStyle = COR.vazio;
+  ctx.fillRect(0, 0, VL, VA);
+  const cam0 = camadaAtual();
+  const e = cam0.escala;
+  const sx = cx * e, sy = cy * e;
+  const sl = Math.min(cam0.canvas.width - sx, visaoL() * e);
+  const sa = Math.min(cam0.canvas.height - sy, visaoA() * e);
+  ctx.drawImage(cam0.canvas, sx, sy, sl, sa, 0, 0, VL, VA);
+
+  const guardaX = cam.x, guardaY = cam.y;
+  cam.x = cx; cam.y = cy;
+
+  /* beirada da área jogável: a fronteira do universo conhecido */
+  const L = limites();
+  ctx.fillStyle = COR.borda;
+  const bx0 = paraTelaX(L.x0), bx1 = paraTelaX(L.x1);
+  const by0 = paraTelaY(L.y0), by1 = paraTelaY(L.y1);
+  for (let y = 0; y < VA; y += 3) {
+    if (bx0 > -1 && bx0 < VL) ctx.fillRect(Math.round(bx0), y, 1, 2);
+    if (bx1 > -1 && bx1 < VL) ctx.fillRect(Math.round(bx1), y, 1, 2);
+  }
+  for (let x = 0; x < VL; x += 3) {
+    if (by0 > -1 && by0 < VA) ctx.fillRect(x, Math.round(by0), 2, 1);
+    if (by1 > -1 && by1 < VA) ctx.fillRect(x, Math.round(by1), 2, 1);
+  }
+
+  /* estrelas */
+  for (const e of estrelas) {
+    const x = paraTelaX(e.x), y = paraTelaY(e.y);
+    if (x < -8 || y < -8 || x > VL + 8 || y > VA + 8) continue;
+    const osc = (Math.sin(e.fase) + 1) / 2;
+    let spr;
+    if (e.presa) {
+      // sendo engolida: encolhe conforme chega perto, como se fosse espremida
+      const d = Math.hypot(buraco.x - e.x, buraco.y - e.y);
+      const perto = limitar(d / (raioMundo() * CFG.ALCANCE_SUCCAO), 0, 1);
+      spr = ESTRELAS_SPR[perto > 0.62 ? 2 : perto > 0.3 ? 1 : 0];
+    } else {
+      spr = ESTRELAS_SPR[osc > 0.72 ? 3 : osc > 0.3 ? 2 : 1];
+    }
+    carimbo(spr, x, y, COR.estrela);
+    if (e.presa) {                               // rastrinho atrás da estrela
+      const dx = buraco.x - e.x, dy = buraco.y - e.y;
+      const d2 = Math.hypot(dx, dy) || 1;
+      px(x - dx / d2 * 4, y - dy / d2 * 4, COR.estrelaSuave);
+      px(x - dx / d2 * 6, y - dy / d2 * 6, COR.poeira[2]);
+    }
+  }
+
+  /* a Terra */
+  if (terra) {
+    const x = Math.round(paraTelaX(terra.x)) - CFG.TERRA_RAIO;
+    const y = Math.round(paraTelaY(terra.y)) - CFG.TERRA_RAIO;
+    if (x > -TERRA_D && y > -TERRA_D && x < VL && y < VA) {
+      ctx.globalAlpha = 0.3;
+      disco(x + CFG.TERRA_RAIO, y + CFG.TERRA_RAIO, CFG.TERRA_RAIO + 3, "#bfe2f7");
+      ctx.globalAlpha = 1;
+      const q = Math.floor(terra.quadro / 7) % TERRA_QUADROS;
+      ctx.drawImage(terraSprite, q * TERRA_D, 0, TERRA_D, TERRA_D, x, y, TERRA_D, TERRA_D);
+      if (CFG.ROSTO) {                       // a Terra também tem carinha
+        const cxT = x + CFG.TERRA_RAIO, cyT = y + CFG.TERRA_RAIO - 1;
+        px(cxT - 2, cyT, COR.rosto); px(cxT + 2, cyT, COR.rosto);
+        px(cxT - 1, cyT + 2, COR.rosto); px(cxT, cyT + 3, COR.rosto); px(cxT + 1, cyT + 2, COR.rosto);
+      }
+    }
+  }
+
+  /* Io */
+  if (io) {
+    const x = Math.round(paraTelaX(io.x)) - CFG.IO_RAIO;
+    const y = Math.round(paraTelaY(io.y)) - CFG.IO_RAIO;
+    if (x > -IO_D && y > -IO_D && x < VL && y < VA) {
+      ctx.globalAlpha = 0.3;                   // brilho quente em volta
+      disco(x + CFG.IO_RAIO, y + CFG.IO_RAIO, CFG.IO_RAIO + 3, COR.fogoClarao);
+      ctx.globalAlpha = 1;
+      const q = Math.floor(io.quadro / 7) % IO_QUADROS;
+      ctx.drawImage(ioSprite, q * IO_D, 0, IO_D, IO_D, x, y, IO_D, IO_D);
+      if (CFG.ROSTO) {                         // Io também tem carinha
+        const cxI = x + CFG.IO_RAIO, cyI = y + CFG.IO_RAIO - 1;
+        px(cxI - 2, cyI, COR.rosto); px(cxI + 2, cyI, COR.rosto);
+        px(cxI - 1, cyI + 2, COR.rosto); px(cxI, cyI + 3, COR.rosto); px(cxI + 1, cyI + 2, COR.rosto);
+      }
+    }
+  }
+
+  /* faíscas */
+  for (const f of faiscas) {
+    const fx = paraTelaX(f.x), fy = paraTelaY(f.y);
+    if (f.tipo === "raio") {                     // os raios do turbo são maiores
+      px(fx, fy, f.cor);
+      px(fx - 1, fy, f.cor); px(fx + 1, fy, f.cor);
+      px(fx, fy - 1, f.cor); px(fx, fy + 1, f.cor);
+    } else if (f.tipo === "gelo") {              // lasca: um X pequenininho
+      px(fx, fy, f.cor);
+      px(fx - 1, fy - 1, f.cor); px(fx + 1, fy + 1, f.cor);
+      px(fx + 1, fy - 1, f.cor); px(fx - 1, fy + 1, f.cor);
+    } else if (f.tipo === "chama") {             // a labareda tem miolo claro
+      px(fx - 1, fy, f.cor); px(fx + 1, fy, f.cor);
+      px(fx, fy - 1, f.cor); px(fx, fy + 1, f.cor);
+      px(fx, fy, COR.fogo[1]);
+    } else px(fx, fy, f.cor);
+  }
+
+  /* o estalo de cada estrela engolida */
+  for (const a of aneis) {
+    const rr = a.r * zoom;
+    const p = a.vida / a.total;
+    const paleta = a.rival ? COR.discoR : COR.disco;
+    const cor = paleta[p > 0.55 ? 5 : 3];
+    const passos = Math.max(10, Math.ceil(rr * 6));
+    for (let i = 0; i < passos; i++) {
+      if (i % 2) continue;                       // anel pontilhado, mais leve
+      const ang = (i / passos) * Math.PI * 2;
+      px(paraTelaX(a.x) + Math.cos(ang) * rr, paraTelaY(a.y) + Math.sin(ang) * rr, cor);
+    }
+  }
+
+  /* corações: sobem e vão desbotando */
+  for (const c of coracoes) {
+    const p = c.vida / c.total;
+    carimbo(CORACOES[c.tam], paraTelaX(c.x), paraTelaY(c.y),
+            COR.coracao[p > 0.6 ? 0 : p > 0.3 ? 1 : 2]);
+  }
+
+  desenharCadente();
+  desenharCometa();
+  desenharBuraco();
+  cam.x = guardaX; cam.y = guardaY;
+}
+
+/* Um só desenhador para os dois personagens: muda a paleta e o dono. */
+function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
+  const bx = paraTelaX(p.x), by = paraTelaY(p.y);
+  const r = raio * (1 + p.pulso * 0.14);        // dá uma inchadinha ao engolir
+
+  ctx.globalAlpha = 0.4;                        // halo macio
+  disco(bx, by, r + 5, halo);
+  ctx.globalAlpha = 1;
+
+  // anel de acreção: duas voltas, fortes de um lado e apagadas do outro
+  const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04);
+  const N = paleta.length;
+  for (let k = 0; k < 2; k++) {
+    const rr = r + 1 + k;
+    const passos = Math.max(20, Math.ceil(rr * 7));
+    for (let i = 0; i < passos; i++) {
+      const a = (i / passos) * Math.PI * 2;
+      const lado = 0.5 + 0.5 * Math.sin(a - giro);
+      const inten = (0.34 + 0.66 * lado) * (1 - k * 0.3);
+      if (inten < 0.3) continue;
+      px(bx + Math.cos(a) * rr, by + Math.sin(a) * rr,
+         paleta[Math.min(N - 1, Math.floor(inten * N))]);
+    }
+  }
+
+  // o corpo é claro: precisa de um fio de contorno para ter silhueta
+  disco(bx, by, r, contorno);
+  disco(bx, by, r - 1, COR.corpo);
+
+  // congelado: casca azul em volta e cristais tremendo na borda
+  if (p.gelo > 0) {
+    const q = Math.min(1, p.gelo / 40);         // derrete no fim
+    ctx.globalAlpha = 0.8 * q;
+    anel(bx, by, r, 1.8, COR.gelo);
+    ctx.globalAlpha = 0.3 * q;
+    disco(bx, by, r - 1, COR.cometa[1]);
+    ctx.globalAlpha = 0.9 * q;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + quadro * 0.01;
+      const rr = r + 1 + (i % 2) + Math.sin(quadro * 0.2 + i) * 0.6;
+      px(bx + Math.cos(a) * rr, by + Math.sin(a) * rr, COR.cometa[i % 2 ? 0 : 2]);
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (CFG.ROSTO) desenharRosto(p, bx, by, r, blush);
+
+  if (p === buraco && flash > 0 && flash % 6 < 3) {
+    ctx.globalAlpha = 0.3; disco(bx, by, r + 4, paleta[6]); ctx.globalAlpha = 1;
+  }
+
+  // barrinhas de duração, logo abaixo do personagem
+  if (comTurbo) {
+    const l = Math.max(14, Math.round(r * 2));
+    const x0 = Math.round(bx - l / 2);
+    let y0 = Math.round(by + r + 5);
+    if (turbo > 0) {
+      ctx.fillStyle = COR.borda; ctx.fillRect(x0, y0, l, 2);
+      ctx.fillStyle = COR.turbo;
+      ctx.fillRect(x0, y0, Math.round(l * turbo / CFG.TERRA_TURBO), 2);
+      y0 += 4;
+    }
+    if (fogo > 0) {
+      ctx.fillStyle = COR.borda; ctx.fillRect(x0, y0, l, 2);
+      ctx.fillStyle = COR.fogoBarra;
+      ctx.fillRect(x0, y0, Math.round(l * fogo / CFG.IO_FOGO), 2);
+      y0 += 4;
+    }
+    if (buraco.gelo > 0) {
+      ctx.fillStyle = COR.borda; ctx.fillRect(x0, y0, l, 2);
+      ctx.fillStyle = COR.gelo;
+      ctx.fillRect(x0, y0, Math.round(l * buraco.gelo / CFG.COMETA_GELO), 2);
+    }
+  }
+}
+
+function desenharCadente() {
+  if (!cadente) return;
+  // rastro dourado que vai apagando
+  for (let i = cadente.rastro.length - 1; i >= 0; i--) {
+    const r = cadente.rastro[i];
+    const p = 1 - i / cadente.rastro.length;
+    const cor = COR.cadente[p > 0.66 ? 1 : p > 0.33 ? 2 : 2];
+    ctx.globalAlpha = 0.25 + p * 0.75;
+    px(paraTelaX(r.x), paraTelaY(r.y), cor);
+    if (p > 0.5) {
+      px(paraTelaX(r.x) + 1, paraTelaY(r.y), cor);
+      px(paraTelaX(r.x), paraTelaY(r.y) + 1, cor);
+    }
+    ctx.globalAlpha = 1;
+  }
+  const x = paraTelaX(cadente.x), y = paraTelaY(cadente.y);
+  ctx.globalAlpha = 0.45;                       // brilho dourado em volta
+  disco(x, y, CFG.CADENTE_RAIO + 2, COR.cadente[0]);
+  ctx.globalAlpha = 1;
+  carimbo(ESTRELAS_SPR[4], x, y, COR.cadente[2]);
+  carimbo(ESTRELAS_SPR[2], x, y, COR.estrela);  // miolo preto, como as outras
+}
+
+/* O rabo é o que dá o aviso: longo, azul, e engrossando perto da cabeça. */
+function desenharCometa() {
+  if (!cometa) return;
+  const n = cometa.rastro.length;
+  for (let i = n - 1; i >= 0; i--) {
+    const r = cometa.rastro[i];
+    const p = 1 - i / n;                        // 1 na cabeça, 0 na ponta do rabo
+    const x = paraTelaX(r.x), y = paraTelaY(r.y);
+    ctx.globalAlpha = 0.16 + p * 0.84;
+    const cor = COR.cometa[p > 0.72 ? 1 : p > 0.4 ? 2 : 3];
+    px(x, y, cor);
+    if (p > 0.35) { px(x + 1, y, cor); px(x, y + 1, cor); }
+    if (p > 0.7)  { px(x - 1, y, cor); px(x, y - 1, cor); }
+  }
+  ctx.globalAlpha = 1;
+  const x = paraTelaX(cometa.x), y = paraTelaY(cometa.y);
+  ctx.globalAlpha = 0.45;                       // coma: o halo gelado da cabeça
+  disco(x, y, CFG.COMETA_RAIO + 2, COR.cometa[1]);
+  ctx.globalAlpha = 1;
+  disco(x, y, 3, COR.cometa[0]);
+  disco(x, y, 2, COR.cometa[2]);
+  px(x, y, COR.cometa[4]);
+}
+
+function desenharBuraco() {
+  desenharPersonagem(rival, raioMundoNivel(rival.nivel) * zoom,
+                     COR.discoR, COR.rivalHalo, COR.rivalContorno, COR.rivalBlush, false);
+  desenharPersonagem(buraco, raioTela,
+                     COR.disco, COR.halo, COR.contorno, COR.blush, true);
+}
+
+/* a carinha: olhos que espiam para onde ele está indo, bochechas e um sorriso */
+function desenharRosto(p, bx, by, r, blush) {
+  const v = Math.hypot(p.vx, p.vy);
+  const ox = v > 0.01 ? (p.vx / v) * r * 0.1 : 0;
+  const oy = v > 0.01 ? (p.vy / v) * r * 0.1 : 0;
+  const t = r < 11 ? 0 : r < 15 ? 1 : r < 20 ? 2 : r < 25 ? 3 : 4;
+  const sep = Math.max(3, r * 0.4);
+  const olho = OLHOS[t];
+
+  if (t >= 1) {                                  // bochechas só quando há espaço
+    ctx.globalAlpha = 0.62;
+    const dist = sep + olho[0].length / 2 + 1.5;
+    carimbo(BOCHECHAS[t], bx - dist + ox, by + r * 0.26 + oy, blush);
+    carimbo(BOCHECHAS[t], bx + dist + ox, by + r * 0.26 + oy, blush);
+    ctx.globalAlpha = 1;
+  }
+  carimbo(olho, bx - sep + ox, by - r * 0.13 + oy, COR.rosto);
+  carimbo(olho, bx + sep + ox, by - r * 0.13 + oy, COR.rosto);
+  carimbo(p.boca > 0 ? BOCAS_O[t] : BOCAS[t], bx + ox, by + r * 0.34 + oy, COR.rosto);
+}
+
+/* Estouro arco-íris: sete faixas concêntricas abrindo a partir do
+   personagem. O "borrão" sai de desenhar cada faixa três vezes, grossa e
+   apagada por baixo, fina e viva por cima — canvas com filtro de blur é
+   caro no celular, e isso dá o mesmo brilho macio de graça. */
+function desenharArcoIris() {
+  if (arco <= 0) return;
+  const p = arco / CFG.ARCO;                 // 1 -> 0
+  const t = 1 - p;                           // 0 -> 1
+  const bx = paraTelaX(buraco.x), by = paraTelaY(buraco.y);
+  const raio = raioTela + Math.pow(t, 0.6) * VL * 0.62;
+  const CORES = COR.arcoiris;
+  const esp = Math.max(2, raio * 0.055);
+
+  for (let i = 0; i < CORES.length; i++) {
+    const rr = raio - i * esp;
+    if (rr <= raioTela * 0.7) continue;
+    const desbota = p * p * (1 - i / (CORES.length + 2));
+    ctx.globalAlpha = desbota * 0.22;        // camada larga: o brilho
+    anel(bx, by, rr + esp, esp * 3, CORES[i]);
+    ctx.globalAlpha = desbota * 0.5;         // camada viva
+    anel(bx, by, rr, esp, CORES[i]);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function desenharClaraoTerra() {
+  if (flashTerra <= 0) return;
+  const p = flashTerra / CFG.TERRA_CLARAO;
+  ctx.globalAlpha = Math.pow(p, 1.4) * 0.85;
+  ctx.fillStyle = COR.turboClarao;
+  ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+}
+
+function desenharClaraoFogo() {
+  if (flashFogo <= 0) return;
+  const p = flashFogo / CFG.IO_CLARAO;
+  ctx.globalAlpha = Math.pow(p, 1.4) * 0.8;
+  ctx.fillStyle = COR.fogoClarao;
+  ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+}
+
+/* estalos vermelhos e laranja nas laterais enquanto o fogo dura */
+function desenharBrilhoQuente() {
+  if (flashQuente <= 0) return;
+  const p = Math.min(1, flashQuente / 24);
+  const larg = Math.max(6, Math.round(VL * 0.19));
+  for (let i = 0; i < larg; i++) {
+    const q = 1 - i / larg;
+    const a = Math.pow(q, 1.7) * p * 0.8;
+    if (a <= 0.012) continue;
+    ctx.globalAlpha = a;
+    // as duas bordas piscam em cores diferentes: fica mais inquieto
+    ctx.fillStyle = COR.fogo[quadro % 6 < 3 ? 3 : 2];
+    ctx.fillRect(i, 0, 1, VA);
+    ctx.fillStyle = COR.fogo[quadro % 6 < 3 ? 2 : 4];
+    ctx.fillRect(VL - 1 - i, 0, 1, VA);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function desenharClaraoGelo() {
+  if (flashGelo > 0) {
+    const p = flashGelo / 26;
+    ctx.globalAlpha = Math.pow(p, 1.4) * 0.8;
+    ctx.fillStyle = COR.geloClarao;
+    ctx.fillRect(0, 0, VL, VA);
+    ctx.globalAlpha = 1;
+  }
+  if (buraco.gelo <= 0) return;
+  // friagem: uma moldura azul fina lembrando que o freio está ligado
+  const q = Math.min(1, buraco.gelo / 40);
+  const larg = Math.max(4, Math.round(VL * 0.13));
+  for (let i = 0; i < larg; i++) {
+    const t = 1 - i / larg;
+    const a = Math.pow(t, 2.2) * 0.5 * q;
+    if (a <= 0.012) continue;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = COR.cometa[1];
+    ctx.fillRect(i, 0, 1, VA); ctx.fillRect(VL - 1 - i, 0, 1, VA);
+    ctx.fillRect(0, i, VL, 1); ctx.fillRect(0, VA - 1 - i, VL, 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function desenharBrilhoLateral() {
+  if (flashLado <= 0) return;
+  const p = flashLado / 34;
+  const larg = Math.max(6, Math.round(VL * 0.19));
+  for (let i = 0; i < larg; i++) {
+    const q = 1 - i / larg;
+    const a = Math.pow(q, 1.9) * p * 0.85;
+    if (a <= 0.012) continue;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = COR.coracao[1];
+    ctx.fillRect(i, 0, 1, VA);
+    ctx.fillRect(VL - 1 - i, 0, 1, VA);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function barra(x, y, l, p, cor) {
+  ctx.fillStyle = COR.borda; ctx.fillRect(x, y, l, 3);
+  ctx.fillStyle = cor; ctx.fillRect(x, y, Math.round(limitar(p, 0, 1) * l), 3);
+}
+
+function marcaNaBorda(mx0, my0, raio, corFora, corDentro, corFarpa) {
+  const cx = VL / 2, cy = VA / 2;
+  const dx = mx0 - cx, dy = my0 - cy;
+  const m = Math.max(Math.abs(dx) / (VL / 2 - 8), Math.abs(dy) / (VA / 2 - 8), 0.001);
+  const mx = cx + dx / m, my = cy + dy / m;
+  disco(mx, my, 4, COR.vazio);
+  disco(mx, my, 3, corFora);
+  disco(mx, my, 2, corDentro);
+  const a = Math.atan2(dy, dx);
+  for (let i = 3; i <= 6; i++) px(mx + Math.cos(a) * i, my + Math.sin(a) * i, corFarpa);
+}
+
+/* quando o rival sai de vista, uma marca azul na borda mostra onde ele está */
+function desenharMarcaRival() {
+  const rx = paraTelaX(rival.x), ry = paraTelaY(rival.y);
+  const rr = raioMundoNivel(rival.nivel) * zoom;
+  if (rx > -rr && rx < VL + rr && ry > -rr && ry < VA + rr) return;
+  marcaNaBorda(rx, ry, rr, COR.rivalContorno, COR.discoR[5], COR.discoR[6]);
+}
+
+function desenharMarcaCadente() {
+  if (!cadente) return;
+  const x = paraTelaX(cadente.x), y = paraTelaY(cadente.y);
+  if (x > -8 && x < VL + 8 && y > -8 && y < VA + 8) return;
+  marcaNaBorda(x, y, 6, COR.cadente[0], COR.cadente[1], COR.cadente[2]);
+}
+
+function desenharMarcaIo() {
+  if (!io) return;
+  const x = paraTelaX(io.x), y = paraTelaY(io.y);
+  if (x > -8 && x < VL + 8 && y > -8 && y < VA + 8) return;
+  marcaNaBorda(x, y, 6, COR.fogo[1], COR.fogo[2], COR.fogo[3]);
+}
+
+function desenharHUD() {
+  desenharMarcaRival();
+  desenharMarcaCadente();
+  desenharMarcaIo();
+  const LARG = 46;
+
+  /* você, à esquerda */
+  texto("voce " + buraco.nivel + "/" + CFG.NIVEL_MAX, 5, 5, COR.hud, 1);
+  if (buraco.nivel < CFG.NIVEL_MAX)
+    barra(5, 14, LARG, buraco.progresso / custoDoNivel(buraco.nivel), COR.disco[4]);
+  texto("estrelas " + buraco.comidas, 5, 21, COR.hudFraco, 1);
+
+  /* o rival, à direita, abaixo do botão de sair */
+  const tr = "rival " + rival.nivel + "/" + CFG.NIVEL_MAX;
+  texto(tr, VL - 5 - larguraTexto(tr, 1), 20, COR.discoR[6], 1);
+  if (rival.nivel < CFG.NIVEL_MAX)
+    barra(VL - 5 - LARG, 29, LARG, rival.progresso / custoDoNivel(rival.nivel), COR.discoR[5]);
+
+  if (flash > 0) textoCentro("CRESCEU!", Math.round(VA * 0.3), COR.coracao[1], 2);
+
+  const b = botaoSair();
+  caixa(b, COR.painel, COR.hudFraco);
+  texto("X", b.x + Math.round((b.l - larguraTexto("X", 1)) / 2), b.y + 3, COR.hud, 1);
+}
+
+/* tela de fim: quem chegou ao nível 12 e quantas estrelas cada um juntou */
+function desenharFim() {
+  ctx.globalAlpha = 0.72;
+  ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+
+  const ganhou = vencedor === buraco;
+  const topo = Math.round(VA * 0.24);
+  textoCentro(ganhou ? "voce venceu!" : "o rival venceu!", topo,
+              ganhou ? COR.hud : COR.discoR[6], 2);
+  textoCentro("chegou ao nivel " + CFG.NIVEL_MAX, topo + 22, COR.hudFraco, 1);
+
+  const y0 = topo + 46;
+  texto("voce", 24, y0, COR.hud, 1);
+  const e1 = buraco.comidas + " estrelas";
+  texto(e1, VL - 24 - larguraTexto(e1, 1), y0, COR.hud, 1);
+  texto("rival", 24, y0 + 14, COR.discoR[6], 1);
+  const e2 = rival.comidas + " estrelas";
+  texto(e2, VL - 24 - larguraTexto(e2, 1), y0 + 14, COR.discoR[6], 1);
+
+  const b = botaoJogar();
+  const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
+  caixa(b, COR.painel, pulso > 0.5 ? COR.disco[4] : COR.disco[3]);
+  texto("de novo", b.x + Math.round((b.l - larguraTexto("de novo", 2)) / 2),
+        b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
+
+  const bs = botaoSair();
+  caixa(bs, COR.painel, COR.hudFraco);
+  texto("X", bs.x + Math.round((bs.l - larguraTexto("X", 1)) / 2), bs.y + 3, COR.hud, 1);
+}
+
+function desenharMenu() {
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+
+  /* logo */
+  const topo = Math.round(VA * 0.2);
+  const tamNome = larguraTexto("blackhole", 3) <= VL - 20 ? 3 : 2;
+  textoCentro("blackhole", topo, COR.hud, tamNome);
+  textoCentro("devoradores de estrelas",
+              topo + FONTE_H * tamNome + 6, COR.disco[4], 1);
+
+  const b = botaoJogar();
+  const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
+  caixa(b, COR.painel, pulso > 0.5 ? COR.disco[5] : COR.disco[4]);
+  texto("JOGAR", b.x + Math.round((b.l - larguraTexto("JOGAR", 2)) / 2),
+        b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
+
+}
+
+function desenharAnalogico() {
+  if (!toque.ativo) return;
+  const cx = toque.ax / escala, cy = toque.ay / escala;
+  ctx.globalAlpha = 0.5;
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2;
+    px(cx + Math.cos(a) * CFG.RAIO_ANALOG, cy + Math.sin(a) * CFG.RAIO_ANALOG, COR.hudFraco);
+  }
+  ctx.globalAlpha = 0.85;
+  disco(toque.x / escala, toque.y / escala, 2, COR.hud);
+  ctx.globalAlpha = 1;
+}
+
+/* Aberração cromática: separa o vermelho do ciano e desloca um para cada
+   lado. Feito com composição de canvas (multiply para isolar o canal,
+   lighter para somar de volta) em vez de mexer pixel a pixel — assim continua
+   rodando na placa de vídeo e não trava o quadro. */
+const bufR = document.createElement("canvas");
+const bufC = document.createElement("canvas");
+
+/* Vinheta DESFOCADA em vez de escurecida: o mundo é desenhado nítido, uma
+   cópia borrada é sobreposta e a máscara elíptica só a deixa aparecer nas
+   bordas. O centro fica limpo e a periferia perde foco.
+   O borrão é feito com cópias deslocadas em média progressiva (alpha 1/n dá
+   a média de verdade) em vez de ctx.filter="blur()", que é caro no celular.
+   Roda antes do HUD de propósito: número borrado no canto ninguém lê. */
+const bufV = document.createElement("canvas");
+const bufM = document.createElement("canvas");
+const DESLOC = [[0,0],[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1],
+                [-2,0],[2,0],[0,-2],[0,2],[-2,-2],[2,-2],[-2,2],[2,2],
+                [-3,0],[3,0],[0,-3],[0,3]];
+let vinhetaPronta = 0;
+
+function prepararVinheta() {
+  bufV.width = bufM.width = VL;
+  bufV.height = bufM.height = VA;
+  const mx = bufM.getContext("2d");
+  mx.setTransform(1, 0, 0, VA / VL, VL / 2, VA / 2);   // círculo vira elipse da tela
+  // rampa curva partindo do próprio centro: com dois pontos só, o começo da
+  // subida vira um anel visível na tela
+  const g = mx.createRadialGradient(0, 0, 0, 0, 0, VL * 0.5 * CFG.VINHETA_FIM);
+  // 160 paradas: com poucas, a emenda entre trechos vira faixa visível em cima
+  // do pontilhado do fundo (o olho enxerga a quebra da derivada, não o degrau).
+  // Alargar a vinheta espalha o gradiente por mais pixels, então precisa de
+  // mais paradas para o mesmo passo em tela — e de um começo sem quina.
+  for (let i = 0; i <= 160; i++) {
+    const t = i / 160;
+    const e = Math.pow(t, CFG.VINHETA_CURVA);
+    const a = e * e * (3 - 2 * e) * CFG.VINHETA_FORCA;   // suaviza as duas pontas
+    g.addColorStop(t, "rgba(0,0,0," + a.toFixed(4) + ")");
+  }
+  mx.clearRect(-VL, -VL, VL * 2, VL * 2);
+  mx.fillStyle = g;
+  mx.fillRect(-VL / 2, -VL / 2, VL, VL);
+  mx.setTransform(1, 0, 0, 1, 0, 0);
+
+  /* Pontilha a máscara. Sem isso, a alfa cai em degraus inteiros de 1/255 e
+     cada degrau vira um anel elíptico em cima do fundo liso — o olho acha o
+     contorno mesmo com um nível de diferença. Espalhando a alfa em ruído
+     fino, o degrau vira granulado e some no pontilhado que o jogo já tem.
+     É um getImageData só, na preparação — nunca por quadro. */
+  const img = mx.getImageData(0, 0, VL, VA);
+  const d = img.data;
+  for (let i = 3; i < d.length; i += 4) {
+    const a = d[i] + (Math.random() * 2 - 1) * 7;
+    d[i] = a < 0 ? 0 : a > 255 ? 255 : a;
+  }
+  mx.putImageData(img, 0, 0);
+
+  vinhetaPronta = VL * 10000 + VA;
+}
+
+function vinheta() {
+  if (!CFG.VINHETA) return;
+  if (vinhetaPronta !== VL * 10000 + VA) prepararVinheta();
+  const vx = bufV.getContext("2d");
+
+  vx.setTransform(1, 0, 0, 1, 0, 0);
+  vx.globalCompositeOperation = "source-over";
+  vx.clearRect(0, 0, VL, VA);
+  for (let i = 0; i < DESLOC.length; i++) {
+    vx.globalAlpha = 1 / (i + 1);                     // média progressiva
+    vx.drawImage(tela, DESLOC[i][0], DESLOC[i][1]);
+  }
+  vx.globalAlpha = 1;
+  vx.globalCompositeOperation = "destination-in";     // recorta pela máscara
+  vx.drawImage(bufM, 0, 0);
+  vx.globalCompositeOperation = "source-over";
+
+  ctx.drawImage(bufV, 0, 0);
+}
+
+/* Miragem: durante o poder de fogo a imagem inteira ondula em faixas
+   horizontais, como ar quente subindo, e desfoca um pouco. Feito por bandas
+   de 3 pixels deslocadas na horizontal — uma cópia por banda, tudo em GPU.
+   Roda antes do HUD: os números continuam parados e legíveis. */
+const bufQ = document.createElement("canvas");
+
+function calor() {
+  if (fogo <= 0) return;
+  const f = Math.min(1, fogo / 45) * Math.min(1, (CFG.IO_FOGO - fogo) / 12);
+  if (f <= 0.02) return;
+  if (bufQ.width !== VL || bufQ.height !== VA) { bufQ.width = VL; bufQ.height = VA; }
+  const qx = bufQ.getContext("2d");
+  qx.globalCompositeOperation = "source-over";
+  qx.clearRect(0, 0, VL, VA);
+  qx.drawImage(tela, 0, 0);
+
+  const H = 3, amp = CFG.IO_ONDA * f;
+  for (let y = 0; y < VA; y += H) {
+    // duas ondas de períodos diferentes: sozinha, uma só vira listra regular
+    const d = Math.sin(y * 0.17 + quadro * 0.13) * amp +
+              Math.sin(y * 0.052 - quadro * 0.071) * amp * 0.6;
+    ctx.drawImage(bufQ, 0, y, VL, H, Math.round(d), y, VL, H);
+  }
+  // desfoque da miragem: a mesma cópia por cima, deslocada e transparente
+  ctx.globalAlpha = CFG.IO_MIRAGEM * f;
+  ctx.drawImage(bufQ, -1, 0); ctx.drawImage(bufQ, 1, 0);
+  ctx.drawImage(bufQ, 0, -1); ctx.drawImage(bufQ, 0, 1);
+  // e um tom quente por cima de tudo
+  ctx.globalAlpha = 0.09 * f;
+  ctx.fillStyle = COR.fogo[2];
+  ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+}
+
+function aberracao() {
+  if (aberr <= 0) return;
+  const forca = aberr / CFG.ABERRACAO;
+  const d = Math.max(1, Math.round(forca * CFG.ABERRACAO_MAX));
+  if (bufR.width !== VL || bufR.height !== VA) {
+    bufR.width = bufC.width = VL;
+    bufR.height = bufC.height = VA;
+  }
+  const rx = bufR.getContext("2d"), cx = bufC.getContext("2d");
+
+  rx.globalCompositeOperation = "source-over";
+  rx.clearRect(0, 0, VL, VA); rx.drawImage(tela, 0, 0);
+  rx.globalCompositeOperation = "multiply";
+  rx.fillStyle = "#ff0000"; rx.fillRect(0, 0, VL, VA);   // sobra só o vermelho
+
+  cx.globalCompositeOperation = "source-over";
+  cx.clearRect(0, 0, VL, VA); cx.drawImage(tela, 0, 0);
+  cx.globalCompositeOperation = "multiply";
+  cx.fillStyle = "#00ffff"; cx.fillRect(0, 0, VL, VA);   // sobra verde e azul
+
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, VL, VA);
+  ctx.globalCompositeOperation = "lighter";              // soma os canais de volta
+  ctx.drawImage(bufR, d, 0);
+  ctx.drawImage(bufC, -d, 0);
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function desenhar() {
+  desenharMundo();
+  desenharArcoIris();
+  desenharClaraoTerra();
+  desenharClaraoFogo();
+  desenharClaraoGelo();
+  desenharBrilhoLateral();
+  desenharBrilhoQuente();
+  calor();
+  vinheta();
+  if (cena === "menu") desenharMenu();
+  else if (cena === "fim") desenharFim();
+  else { desenharHUD(); desenharAnalogico(); }
+  aberracao();
+}
+
+/* ── laço principal ──────────────────────────────────────────── */
+let acumulado = 0, ultimo = performance.now();
+const DT = 1000 / 60;
+
+function laco(agora) {
+  acumulado += Math.min(100, agora - ultimo);
+  ultimo = agora;
+  let n = 0;
+  while (acumulado >= DT && n++ < 5) { passo(); acumulado -= DT; }
+  if (acumulado > DT) acumulado = 0;
+  desenhar();
+  requestAnimationFrame(laco);
+}
+requestAnimationFrame(laco);
+</script>
+</body>
+</html>
