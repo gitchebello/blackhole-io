@@ -43,8 +43,8 @@ const CFG = {
   RAIO_TELA_PASSO: 1,    // quanto o raio aparente cresce por nível
 
   /* universo em expansão */
-  ZOOM_PASSO: 0.045,     // quanto a câmera se afasta por nível
-  ZOOM_MIN: 0.45,        // afastamento máximo
+  ZOOM_PASSO: 0.0225,    // quanto a câmera se afasta por nível (metade do que era)
+  ZOOM_MIN: 0.7,         // afastamento máximo
   MUNDO_MULT: 1.6,       // o mundo tem esta vez o tamanho do que a câmera vê
 
   /* movimento (em pixels de TELA por quadro: o mundo já compensa o zoom) */
@@ -87,10 +87,11 @@ const COR = {
   halo:   "#4a3570",
   rosto:  "#ffffff",
   blush:  "#ff9ecb",
+  coracao:["#ff6fae","#ff9ecb","#ffc2dd"],
   turbo:  "#a8f0ff",
   borda:  "#2a2740",
-  hud:    "#ffffff",
-  hudFraco:"#a9b0c6",
+  hud:    "#ffd0e6",
+  hudFraco:"#c98cae",
   aviso:  "#ffe4b5",
   painel: "#0c0a18"
 };
@@ -247,9 +248,6 @@ const MUNDO = {
   A: Math.ceil(VA / CFG.ZOOM_MIN * CFG.MUNDO_MULT)
 };
 
-const fundo = document.createElement("canvas");
-fundo.width = MUNDO.L; fundo.height = MUNDO.A;
-
 // matriz de Bayer: mistura duas cores vizinhas com pontilhado,
 // que é como a pixel art faz degradê sem inventar cor nova
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
@@ -318,9 +316,19 @@ function sortearNebulosas() {
 }
 const NEBULOSAS = sortearNebulosas();
 
-function pintarNebulosa() {
-  const fx = fundo.getContext("2d");
-  const img = fx.createImageData(MUNDO.L, MUNDO.A);
+/* A nebulosa é pintada uma vez POR CAMADA DE ZOOM. Antes existia um único
+   canvas no tamanho do universo inteiro, que era encolhido na hora de
+   desenhar — e encolher pixel art come pixels: o pontilhado virava moiré e
+   ainda custava caro, porque a cada quadro o navegador reamostrava uma área
+   enorme. Agora cada camada já nasce na resolução em que vai aparecer, então
+   o desenho sai 1:1, sem serrilhado e sem reamostragem. */
+function pintarNebulosa(escala) {
+  const L = Math.max(1, Math.round(MUNDO.L * escala));
+  const A = Math.max(1, Math.round(MUNDO.A * escala));
+  const cv = document.createElement("canvas");
+  cv.width = L; cv.height = A;
+  const fx = cv.getContext("2d");
+  const img = fx.createImageData(L, A);
   const d = img.data;
   const rgb = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
   const paletas = COR.nebs.map(p => p.map(rgb));
@@ -329,20 +337,20 @@ function pintarNebulosa() {
     d[i] = vazio[0]; d[i+1] = vazio[1]; d[i+2] = vazio[2]; d[i+3] = 255;
   }
 
-  /* densidade calculada em blocos de 2x2 (rápido, e deixa a nuvem mais
-     chapada, que combina com pixel art); guarda a nuvem mais forte */
-  const BL = Math.ceil(MUNDO.L / 2), BA = Math.ceil(MUNDO.A / 2);
+  /* densidade em blocos de 2x2 PIXELS DE TELA (assim o grão da nuvem tem
+     o mesmo tamanho aparente em todas as camadas) */
+  const BL = Math.ceil(L / 2), BA = Math.ceil(A / 2);
   const forca = new Float32Array(BL * BA);
   const dono  = new Uint8Array(BL * BA);
 
   for (const n of NEBULOSAS) {
-    const bx0 = Math.max(0, Math.floor((n.x - n.R) / 2));
-    const bx1 = Math.min(BL - 1, Math.ceil((n.x + n.R) / 2));
-    const by0 = Math.max(0, Math.floor((n.y - n.R) / 2));
-    const by1 = Math.min(BA - 1, Math.ceil((n.y + n.R) / 2));
+    const bx0 = Math.max(0, Math.floor((n.x - n.R) * escala / 2));
+    const bx1 = Math.min(BL - 1, Math.ceil((n.x + n.R) * escala / 2));
+    const by0 = Math.max(0, Math.floor((n.y - n.R) * escala / 2));
+    const by1 = Math.min(BA - 1, Math.ceil((n.y + n.R) * escala / 2));
     for (let by = by0; by <= by1; by++) {
       for (let bx = bx0; bx <= bx1; bx++) {
-        const x = bx * 2, y = by * 2;
+        const x = bx * 2 / escala, y = by * 2 / escala;   // volta pro mundo
         let v = 0;
         for (const b of n.bolhas) {          // bolhas que se fundem
           const dx = x - n.x - b.dx, dy = y - n.y - b.dy;
@@ -367,17 +375,17 @@ function pintarNebulosa() {
       const v = forca[i];
       if (v <= 0) continue;
       const paleta = paletas[dono[i]];
-      const tom = Math.min(1, v) * DEGRAUS;                          // 0..4
+      const tom = Math.min(1, v) * DEGRAUS;
       const base = Math.floor(tom), frac = tom - base;
       for (let oy = 0; oy < 2; oy++) {
-        const y = by * 2 + oy; if (y >= MUNDO.A) break;
+        const y = by * 2 + oy; if (y >= A) break;
         for (let ox = 0; ox < 2; ox++) {
-          const x = bx * 2 + ox; if (x >= MUNDO.L) break;
+          const x = bx * 2 + ox; if (x >= L) break;
           const lim = (BAYER[(x & 3) + (y & 3) * 4] + embaralha(x, y, 31) * 5 - 2.5) / 16;
           const passo = base + (frac > lim ? 1 : 0);
           if (passo <= 0) continue;                    // franja pontilhada: vira vácuo
           const cor = paleta[Math.min(DEGRAUS - 1, passo - 1)];
-          const j = (y * MUNDO.L + x) * 4;
+          const j = (y * L + x) * 4;
           d[j] = cor[0]; d[j+1] = cor[1]; d[j+2] = cor[2];
         }
       }
@@ -390,14 +398,27 @@ function pintarNebulosa() {
   const pontos = Math.round(MUNDO.L * MUNDO.A / 1100);
   for (let i = 0; i < pontos; i++) {
     fx.fillStyle = COR.poeira[Math.floor(r() * COR.poeira.length)];
-    fx.fillRect(Math.floor(r() * MUNDO.L), Math.floor(r() * MUNDO.A), 1, 1);
+    fx.fillRect(Math.round(r() * MUNDO.L * escala), Math.round(r() * MUNDO.A * escala), 1, 1);
   }
   for (let i = 0; i < pontos / 9; i++) {
     fx.fillStyle = COR.poeira[2];
-    fx.fillRect(Math.floor(r() * MUNDO.L), Math.floor(r() * MUNDO.A), 1, 1);
+    fx.fillRect(Math.round(r() * MUNDO.L * escala), Math.round(r() * MUNDO.A * escala), 1, 1);
   }
+  return { escala: escala, canvas: cv };
 }
-pintarNebulosa();
+
+/* uma camada por degrau de zoom, da mais próxima à mais afastada */
+const CAMADAS = [];
+for (let e = 1; e > CFG.ZOOM_MIN + 0.001; e -= 0.1)
+  CAMADAS.push(pintarNebulosa(Math.round(e * 100) / 100));
+CAMADAS.push(pintarNebulosa(CFG.ZOOM_MIN));
+
+/* a menor camada que ainda não precisa ser ampliada */
+function camadaAtual() {
+  let melhor = CAMADAS[CAMADAS.length - 1];
+  for (const c of CAMADAS) if (c.escala >= zoom - 0.001) melhor = c;
+  return melhor;
+}
 
 /* ── sprite da Terra: 8 quadros de rotação, desenhados pixel a pixel ── */
 const TERRA_D = CFG.TERRA_RAIO * 2 + 1;
@@ -469,6 +490,38 @@ function oval(cx, cy, rx, ry, cor) {
     ctx.fillRect(x0 - w, y0 + dy, w * 2 + 1, 1);
   }
 }
+function carimbo(mapa, cx, cy, cor) {          // estampa um desenhinho centrado
+  ctx.fillStyle = cor;
+  const l = mapa[0].length, a = mapa.length;
+  const x0 = Math.round(cx - l / 2), y0 = Math.round(cy - a / 2);
+  for (let y = 0; y < a; y++) {
+    const linha = mapa[y];
+    for (let x = 0; x < l; x++) if (linha[x] === "#") ctx.fillRect(x0 + x, y0 + y, 1, 1);
+  }
+}
+
+/* olhos, bochechas e bocas desenhados à mão em três tamanhos: círculo
+   pequeno feito por fórmula sempre sai quadrado, então aqui vai na régua */
+const OLHOS = [
+  [".##.", "####", "####", "####", ".##."],
+  [".###.", "#####", "#####", "#####", "#####", ".###."],
+  ["..##..", ".####.", "######", "######", "######", "######", ".####.", "..##.."]
+];
+const BOCHECHAS = [
+  [".##.", "####", ".##."],
+  [".###.", "#####", ".###."],
+  ["..##..", ".####.", "######", ".####."]
+];
+const BOCAS = [
+  ["#...#", ".###."],
+  ["#.....#", ".#####."],
+  ["#.......#", ".#.....#", "..#####.."]
+];
+const CORACOES = [
+  ["#.#", "###", ".#."],
+  [".#.#.", "#####", "#####", ".###.", "..#.."]
+];
+
 function px(x, y, cor) {
   ctx.fillStyle = cor;
   ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
@@ -526,8 +579,8 @@ const rnd = semente(CFG.SEMENTE + 4242);
 
 let cena = "menu";                 // "menu" | "jogo"
 const buraco = { x: 0, y: 0, vx: 0, vy: 0, ang: -Math.PI / 2, nivel: 0 };
-let estrelas = [], faiscas = [], terra = null, esperaTerra = 0, turbo = 0;
-let comidas = 0, progresso = 0, tremor = 0, flash = 0, quadro = 0;
+let estrelas = [], faiscas = [], coracoes = [], terra = null, esperaTerra = 0, turbo = 0;
+let comidas = 0, progresso = 0, tremor = 0, flash = 0, flashLado = 0, quadro = 0;
 let zoom = 1, zoomAlvo = 1, raioTela = CFG.RAIO_BASE;
 const cam = { x: 0, y: 0 };
 
@@ -593,7 +646,7 @@ function reiniciar() {
   raioTela = CFG.RAIO_BASE; zoom = zoomAlvo = 1;
   buraco.x = MUNDO.L / 2; buraco.y = MUNDO.A / 2;
   buraco.vx = buraco.vy = 0; buraco.ang = -Math.PI / 2;
-  faiscas = []; tremor = 0; flash = 0; turbo = 0;
+  faiscas = []; coracoes = []; tremor = 0; flash = 0; flashLado = 0; turbo = 0;
   estrelas = [];
   for (let i = 0; i < alvoEstrelas(); i++) estrelas.push(novaEstrela(buraco));
   terra = novaTerra(); esperaTerra = 0;
@@ -742,8 +795,18 @@ function passo() {
     if (f.vida <= 0) faiscas.splice(i, 1);
   }
 
-  if (tremor > 0) tremor *= 0.86;
+  for (let i = coracoes.length - 1; i >= 0; i--) {
+    const c = coracoes[i];
+    c.x += c.vx + Math.sin(c.fase + quadro * 0.09) * 0.14 / zoom;   // bambeia
+    c.y += c.vy;
+    c.vy -= 0.005 / zoom;                                           // sobem
+    c.vx *= 0.985;
+    if (--c.vida <= 0) coracoes.splice(i, 1);
+  }
+
+  if (tremor > 0) tremor *= 0.88;
   if (flash > 0) flash--;
+  if (flashLado > 0) flashLado--;
 
   /* — câmera — */
   const alvoX = limitar(buraco.x - visaoL() / 2, L.x0, L.x1 - visaoL());
@@ -763,18 +826,31 @@ function faiscar(x, y, quantas, dei, dfi) {
   }
 }
 
+function soltarCoracoes(x, y, quantos, forca) {
+  for (let k = 0; k < quantos; k++) {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.7;
+    const vel = (0.35 + Math.random() * 0.85) * (forca || 1) / zoom;
+    const vida = 42 + Math.floor(Math.random() * 34);
+    coracoes.push({ x: x, y: y, vx: Math.cos(a) * vel, vy: Math.sin(a) * vel,
+                    vida: vida, total: vida, tam: Math.random() < 0.55 ? 0 : 1,
+                    fase: Math.random() * Math.PI * 2 });
+  }
+}
+
 function engolirEstrela(indice) {
   const e = estrelas[indice];
   faiscar(e.x, e.y, 7, 3, 8);
   estrelas.splice(indice, 1);
   if (cena !== "jogo") return;          // no menu ele come só de enfeite
   comidas++;
+  if (Math.random() < 0.28) soltarCoracoes(e.x, e.y, 1, 0.7);
   if (noMaximo()) return;
   progresso++;
   if (progresso >= custoDoNivel(buraco.nivel)) {
     progresso = 0;
     buraco.nivel++;
-    tremor = 5; flash = 30;
+    tremor = 11; flash = 30; flashLado = 34;
+    soltarCoracoes(buraco.x, buraco.y, 16, 1.4);
   }
 }
 
@@ -784,7 +860,8 @@ function engolirTerra() {
   esperaTerra = CFG.TERRA_ESPERA;
   if (cena !== "jogo") return;
   turbo = CFG.TERRA_TURBO;
-  tremor = 6;
+  tremor = 7;
+  soltarCoracoes(buraco.x, buraco.y, 8, 1.1);
 }
 
 /* ── desenho ─────────────────────────────────────────────────── */
@@ -792,13 +869,19 @@ const paraTelaX = wx => (wx - cam.x) * zoom;
 const paraTelaY = wy => (wy - cam.y) * zoom;
 
 function desenharMundo() {
-  const sacode = tremor > 0.3 ? (Math.random() - 0.5) * tremor : 0;
-  const cx = limitar(cam.x + sacode, 0, MUNDO.L - visaoL());
-  const cy = limitar(cam.y + sacode, 0, MUNDO.A - visaoA());
+  const sx0 = tremor > 0.3 ? (Math.random() - 0.5) * tremor / zoom : 0;
+  const sy0 = tremor > 0.3 ? (Math.random() - 0.5) * tremor / zoom : 0;
+  const cx = limitar(cam.x + sx0, 0, MUNDO.L - visaoL());
+  const cy = limitar(cam.y + sy0, 0, MUNDO.A - visaoA());
 
   ctx.fillStyle = COR.vazio;
   ctx.fillRect(0, 0, VL, VA);
-  ctx.drawImage(fundo, cx, cy, visaoL(), visaoA(), 0, 0, VL, VA);
+  const cam0 = camadaAtual();
+  const e = cam0.escala;
+  const sx = cx * e, sy = cy * e;
+  const sl = Math.min(cam0.canvas.width - sx, visaoL() * e);
+  const sa = Math.min(cam0.canvas.height - sy, visaoA() * e);
+  ctx.drawImage(cam0.canvas, sx, sy, sl, sa, 0, 0, VL, VA);
 
   const guardaX = cam.x, guardaY = cam.y;
   cam.x = cx; cam.y = cy;
@@ -861,6 +944,13 @@ function desenharMundo() {
   /* faíscas */
   for (const f of faiscas) px(paraTelaX(f.x), paraTelaY(f.y), f.cor);
 
+  /* corações: sobem e vão desbotando */
+  for (const c of coracoes) {
+    const p = c.vida / c.total;
+    carimbo(CORACOES[c.tam], paraTelaX(c.x), paraTelaY(c.y),
+            COR.coracao[p > 0.6 ? 0 : p > 0.3 ? 1 : 2]);
+  }
+
   desenharBuraco();
   cam.x = guardaX; cam.y = guardaY;
 }
@@ -904,29 +994,37 @@ function desenharRosto(bx, by, r) {
   const v = Math.hypot(buraco.vx, buraco.vy);
   const ox = v > 0.01 ? (buraco.vx / v) * r * 0.1 : 0;
   const oy = v > 0.01 ? (buraco.vy / v) * r * 0.1 : 0;
-  const sep = Math.max(2.5, r * 0.42);
-  const olhoX = Math.max(1.2, r * 0.16);
-  const olhoY = Math.max(1.4, r * 0.21);
-  const cy = by - r * 0.12 + oy;
+  const t = r < 11 ? 0 : r < 16 ? 1 : 2;
+  const sep = Math.max(3, r * 0.4);
+  const olho = OLHOS[t];
 
-  if (r >= 9) {                                  // bochechas só quando há espaço
-    ctx.globalAlpha = 0.45;
-    const bX = Math.max(1.2, r * 0.15), bY = Math.max(1.2, r * 0.11);
-    oval(bx - sep - olhoX - 1 + ox, by + r * 0.26 + oy, bX, bY, COR.blush);
-    oval(bx + sep + olhoX + 1 + ox, by + r * 0.26 + oy, bX, bY, COR.blush);
+  if (t >= 1) {                                  // bochechas só quando há espaço
+    ctx.globalAlpha = 0.62;
+    const dist = sep + olho[0].length / 2 + 1.5;
+    carimbo(BOCHECHAS[t], bx - dist + ox, by + r * 0.26 + oy, COR.blush);
+    carimbo(BOCHECHAS[t], bx + dist + ox, by + r * 0.26 + oy, COR.blush);
     ctx.globalAlpha = 1;
   }
+  carimbo(olho, bx - sep + ox, by - r * 0.13 + oy, COR.rosto);
+  carimbo(olho, bx + sep + ox, by - r * 0.13 + oy, COR.rosto);
+  carimbo(BOCAS[t], bx + ox, by + r * 0.34 + oy, COR.rosto);
+}
 
-  oval(bx - sep + ox, cy, olhoX, olhoY, COR.rosto);
-  oval(bx + sep + ox, cy, olhoX, olhoY, COR.rosto);
-
-  const mx = bx + ox, my = by + r * 0.34 + oy;   // sorriso: arco de um pixel
-  const larg = Math.max(1, Math.round(r * 0.22));
-  const alt  = Math.max(1, Math.round(r * 0.14));
-  for (let i = -larg; i <= larg; i++) {
-    const t = i / larg;
-    px(mx + i, my + Math.round((1 - t * t) * alt), COR.rosto);
+/* quando ele cresce, as bordas da tela piscam rosa */
+function desenharBrilhoLateral() {
+  if (flashLado <= 0) return;
+  const p = flashLado / 34;
+  const larg = Math.max(6, Math.round(VL * 0.19));
+  for (let i = 0; i < larg; i++) {
+    const q = 1 - i / larg;
+    const a = Math.pow(q, 1.7) * p;
+    if (a <= 0.012) continue;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = COR.coracao[i % 3 === 0 ? 2 : 1];
+    ctx.fillRect(i, 0, 1, VA);
+    ctx.fillRect(VL - 1 - i, 0, 1, VA);
   }
+  ctx.globalAlpha = 1;
 }
 
 function desenharHUD() {
@@ -954,7 +1052,7 @@ function desenharHUD() {
     ctx.fillRect(Math.round((VL - 40) / 2), 15, larguraT, 2);
   }
 
-  if (flash > 0) textoCentro("cresceu!", Math.round(VA * 0.28), COR.aviso, 2);
+  if (flash > 0) textoCentro("cresceu!", Math.round(VA * 0.28), COR.coracao[1], 2);
 
   /* botão de sair */
   const b = botaoSair();
@@ -1005,6 +1103,7 @@ function desenharAnalogico() {
 
 function desenhar() {
   desenharMundo();
+  desenharBrilhoLateral();
   if (cena === "menu") desenharMenu();
   else { desenharHUD(); desenharAnalogico(); }
 }
