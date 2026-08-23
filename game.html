@@ -79,6 +79,12 @@ const CFG = {
   ABERRACAO: 26,         // quadros de aberração cromática ao crescer
   ARCO: 34,              // quadros do estouro arco-íris ao crescer
 
+  /* vinheta desfocada */
+  VINHETA: true,
+  VINHETA_CURVA: 3,      // quanto o desfoque demora a aparecer saindo do centro
+  VINHETA_FIM: 1.05,     // onde ele chega ao máximo (1 = borda da tela)
+  VINHETA_FORCA: 0.95,
+
   /* trombada entre os dois */
   COLISAO_ESTRELAS: 5,   // quantas estrelas o menor perde na trombada
   COLISAO_EMPURRAO: 9,   // com que força os dois são arremessados
@@ -1627,6 +1633,60 @@ function desenharAnalogico() {
 const bufR = document.createElement("canvas");
 const bufC = document.createElement("canvas");
 
+/* Vinheta DESFOCADA em vez de escurecida: o mundo é desenhado nítido, uma
+   cópia borrada é sobreposta e a máscara elíptica só a deixa aparecer nas
+   bordas. O centro fica limpo e a periferia perde foco.
+   O borrão é feito com cópias deslocadas em média progressiva (alpha 1/n dá
+   a média de verdade) em vez de ctx.filter="blur()", que é caro no celular.
+   Roda antes do HUD de propósito: número borrado no canto ninguém lê. */
+const bufV = document.createElement("canvas");
+const bufM = document.createElement("canvas");
+const DESLOC = [[0,0],[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1],
+                [-2,0],[2,0],[0,-2],[0,2]];
+let vinhetaPronta = 0;
+
+function prepararVinheta() {
+  bufV.width = bufM.width = VL;
+  bufV.height = bufM.height = VA;
+  const mx = bufM.getContext("2d");
+  mx.setTransform(1, 0, 0, VA / VL, VL / 2, VA / 2);   // círculo vira elipse da tela
+  // rampa curva partindo do próprio centro: com dois pontos só, o começo da
+  // subida vira um anel visível na tela
+  const g = mx.createRadialGradient(0, 0, 0, 0, 0, VL * 0.5 * CFG.VINHETA_FIM);
+  // 48 paradas: com poucas, a emenda entre trechos vira faixa visível em cima
+  // do pontilhado do fundo (o olho enxerga a quebra da derivada, não o degrau)
+  for (let i = 0; i <= 48; i++) {
+    const t = i / 48;
+    const a = Math.pow(t, CFG.VINHETA_CURVA) * CFG.VINHETA_FORCA;
+    g.addColorStop(t, "rgba(0,0,0," + a.toFixed(4) + ")");
+  }
+  mx.clearRect(-VL, -VL, VL * 2, VL * 2);
+  mx.fillStyle = g;
+  mx.fillRect(-VL / 2, -VL / 2, VL, VL);
+  mx.setTransform(1, 0, 0, 1, 0, 0);
+  vinhetaPronta = VL * 10000 + VA;
+}
+
+function vinheta() {
+  if (!CFG.VINHETA) return;
+  if (vinhetaPronta !== VL * 10000 + VA) prepararVinheta();
+  const vx = bufV.getContext("2d");
+
+  vx.setTransform(1, 0, 0, 1, 0, 0);
+  vx.globalCompositeOperation = "source-over";
+  vx.clearRect(0, 0, VL, VA);
+  for (let i = 0; i < DESLOC.length; i++) {
+    vx.globalAlpha = 1 / (i + 1);                     // média progressiva
+    vx.drawImage(tela, DESLOC[i][0], DESLOC[i][1]);
+  }
+  vx.globalAlpha = 1;
+  vx.globalCompositeOperation = "destination-in";     // recorta pela máscara
+  vx.drawImage(bufM, 0, 0);
+  vx.globalCompositeOperation = "source-over";
+
+  ctx.drawImage(bufV, 0, 0);
+}
+
 function aberracao() {
   if (aberr <= 0) return;
   const forca = aberr / CFG.ABERRACAO;
@@ -1660,6 +1720,7 @@ function desenhar() {
   desenharArcoIris();
   desenharClaraoTerra();
   desenharBrilhoLateral();
+  vinheta();
   if (cena === "menu") desenharMenu();
   else if (cena === "fim") desenharFim();
   else { desenharHUD(); desenharAnalogico(); }
