@@ -73,7 +73,6 @@ const CFG = {
   IO_RECARGA: 45,        // quadros entre um hit e o outro
   IO_CLARAO: 26,         // duracao do flash laranja ao devora-la
   IO_ONDA: 2.4,          // amplitude da miragem, em pixels
-  IO_MIRAGEM: 0.34,      // quanto a imagem desfoca durante o efeito
 
   NEBULOSAS: 10,          // nuvens de gás espalhadas pelo mapa; o resto é vácuo
 
@@ -94,7 +93,7 @@ const CFG = {
   VINHETA: true,
   VINHETA_CURVA: 1.6,    // quanto o desfoque demora a aparecer saindo do centro
   VINHETA_FIM: 0.96,     // onde ele chega ao máximo (1 = borda da tela)
-  VINHETA_FORCA: 1,
+  VINHETA_FORCA: 0.72,   // teto do desfoque na borda: 1 troca o pixel todo
 
   /* trombada entre os dois */
   COLISAO_ESTRELAS: 5,   // quantas estrelas o menor perde na trombada
@@ -2061,9 +2060,7 @@ const bufC = document.createElement("canvas");
    Roda antes do HUD de propósito: número borrado no canto ninguém lê. */
 const bufV = document.createElement("canvas");
 const bufM = document.createElement("canvas");
-const DESLOC = [[0,0],[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1],
-                [-2,0],[2,0],[0,-2],[0,2],[-2,-2],[2,-2],[-2,2],[2,2],
-                [-3,0],[3,0],[0,-3],[0,3]];
+const DESLOC = [[0,0],[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]];
 let vinhetaPronta = 0;
 
 function prepararVinheta() {
@@ -2148,11 +2145,8 @@ function calor() {
               Math.sin(y * 0.052 - quadro * 0.071) * amp * 0.6;
     ctx.drawImage(bufQ, 0, y, VL, H, Math.round(d), y, VL, H);
   }
-  // desfoque da miragem: a mesma cópia por cima, deslocada e transparente
-  ctx.globalAlpha = CFG.IO_MIRAGEM * f;
-  ctx.drawImage(bufQ, -1, 0); ctx.drawImage(bufQ, 1, 0);
-  ctx.drawImage(bufQ, 0, -1); ctx.drawImage(bufQ, 0, 1);
-  // e um tom quente por cima de tudo
+  // sem desfoque aqui de propósito: borrar a tela inteira só embaçava o jogo.
+  // a ondulação já dá a miragem, e o pixel art continua nítido.
   ctx.globalAlpha = 0.09 * f;
   ctx.fillStyle = COR.fogo[2];
   ctx.fillRect(0, 0, VL, VA);
