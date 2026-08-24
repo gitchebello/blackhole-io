@@ -119,8 +119,10 @@ const CFG = {
 /* ── paleta ──────────────────────────────────────────────────── */
 const COR = {
   vazio:  "#fdf7fa",                                  // o céu agora é branco
-  nebs: [["#ffeef5","#ffdbe9","#ffc4dc","#ffabcd"],   // rosa
-         ["#eef6fd","#dcecfa","#c4e0f6","#a9d2f2"]],  // azul-claro
+  // seis degraus: a franja continua clarinha e o miolo agora fecha em um tom
+  // bem mais forte. É o contraste dentro da própria nuvem que dá o volume
+  nebs: [["#fff2f8","#ffdfec","#ffc4dc","#ffa3c8","#f97fae","#ec5b93"],   // rosa
+         ["#f1f8fe","#dcecfa","#c0e0f7","#9dcdf3","#74b3e8","#4d96d8"]],  // azul
   poeira:["#f2e8ee","#ecdfe8","#e4d5e0"],
   estrela:"#241c33",                                  // estrelas pretas
   estrelaSuave:"#6a5f80",
@@ -312,7 +314,7 @@ const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 function sortearNebulosas() {
   const r = semente(CFG.SEMENTE + 17);
   const lista = [];
-  const raioBase = Math.min(MUNDO.L, MUNDO.A) * 0.095;
+  const raioBase = Math.min(MUNDO.L, MUNDO.A) * 0.15;
   for (let tent = 0; tent < 1200 && lista.length < CFG.NEBULOSAS; tent++) {
     const rx = raioBase * (0.7 + r() * 0.7);
     const ry = rx * (0.75 + r() * 0.5);
@@ -334,7 +336,7 @@ function sortearNebulosas() {
 
     let cabe = true;
     for (const o of lista)
-      if (Math.hypot(o.x - n.x, o.y - n.y) < (o.R + n.R) * 0.95) cabe = false;
+      if (Math.hypot(o.x - n.x, o.y - n.y) < (o.R + n.R) * 0.72) cabe = false;
     if (cabe) lista.push(n);
   }
   // cores: uma parte para cada, embaralhadas, e sem duas vizinhas iguais
@@ -414,7 +416,7 @@ function pintarNebulosa(escala) {
         if (v <= 0) continue;
         // um tempero de ruído só para a borda não ficar de compasso
         v *= 0.82 + 0.3 * fractal(x * n.esc, y * n.esc, n.s, 3);
-        v = Math.min(1, v * 0.32);   // sobra bem mais franja: o gás fica leve
+        v = Math.min(1, v * 0.42);   // sobe o miolo até os tons fortes; a franja segue rala
         if (v <= 0.02) continue;
         const i = by * BL + bx;
         if (v > forca[i]) { forca[i] = v; dono[i] = n.pal; }
@@ -422,7 +424,7 @@ function pintarNebulosa(escala) {
     }
   }
 
-  const DEGRAUS = 4;
+  const DEGRAUS = 6;
   for (let by = 0; by < BA; by++) {
     for (let bx = 0; bx < BL; bx++) {
       const i = by * BL + bx;
@@ -438,7 +440,7 @@ function pintarNebulosa(escala) {
           const lim = (BAYER[(x & 3) + (y & 3) * 4] + embaralha(x, y, 31) * 5 - 2.5) / 16;
           const passo = base + (frac > lim ? 1 : 0);
           if (passo <= 0) continue;                    // franja pontilhada: vira vácuo
-          const cor = paleta[Math.min(DEGRAUS - 1, passo - 1)];
+          const cor = paleta[Math.min(paleta.length - 1, passo - 1)];
           const j = (y * L + x) * 4;
           d[j] = cor[0]; d[j+1] = cor[1]; d[j+2] = cor[2];
         }
@@ -1483,36 +1485,29 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   disco(bx, by, r + 5, halo);
   ctx.globalAlpha = 1;
 
-  // Anel de acreção: forte de um lado e apagado do outro, como antes. O que
-  // mudou é a ESPESSURA, que agora varia ao longo da volta em vez de ser fixa
-  // em duas camadas — é o volume irregular que dá a sensação de fluido.
-  //
-  // As ondas usam harmônicos INTEIROS do ângulo (3, 5 e 7). Isso é o que faz
-  // o desenho fechar a volta sem emenda: qualquer valor quebrado deixaria um
-  // degrau visível onde a=0 encontra a=2π. E cada uma anda num ritmo próprio,
-  // então o relevo nunca se repete igual — parece matéria escorrendo, não um
-  // anel entalhado girando.
-  const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04);
-  const corre = comTurbo && turbo > 0 ? 2.2 : 1;      // no turbo o fluido agita
-  const f = p === buraco ? 0 : 2.3;                   // os dois fora de sincronia
+  // Disco de acreção: um círculo simples, com a frente clara liderando o giro.
+  // A intensidade de cada ponto vem do quanto ele ficou PARA TRÁS da frente,
+  // e não de um seno em volta do anel. A diferença é que assim a borda de
+  // ataque é um corte seco e o rastro se apaga devagar atrás dela — é isso
+  // que dá o sentido do fluxo. Com seno, os dois lados são simétricos e o
+  // anel parece só piscar.
+  const giro = quadro * (comTurbo && turbo > 0 ? 0.075 : 0.034);
   const N = paleta.length;
-  const passos = Math.max(20, Math.ceil((r + 4) * 7));
+  const rr = r + 1;
+  const TAU = Math.PI * 2;
+  const passos = Math.max(24, Math.ceil(rr * 8));
   for (let i = 0; i < passos; i++) {
-    const a = (i / passos) * Math.PI * 2;
-    const lado = 0.5 + 0.5 * Math.sin(a - giro);
-    const onda = 0.45 * Math.sin(3 * a + quadro * 0.021 * corre + f) +
-                 0.30 * Math.sin(5 * a - quadro * 0.014 * corre + f * 2 + 1.7) +
-                 0.25 * Math.sin(7 * a + quadro * 0.009 * corre + f * 3 + 4.1);
-    // o lado brilhante também é o mais encorpado: material se acumulando
-    const nk = Math.max(1, Math.round(1 + (0.5 + 0.5 * onda) * (1.3 + lado * 1.9)));
-    for (let k = 0; k < nk; k++) {
-      const queda = nk > 1 ? k / (nk - 1) : 0;        // 0 por dentro, 1 na ponta
-      const inten = (0.34 + 0.66 * lado) * (1 - queda * 0.42);
-      if (inten < 0.3) continue;
-      const rr = r + 1 + k;
-      px(bx + Math.cos(a) * rr, by + Math.sin(a) * rr,
-         paleta[Math.min(N - 1, Math.floor(inten * N))]);
-    }
+    const a = (i / passos) * TAU;
+    let atras = (giro - a) % TAU;
+    if (atras < 0) atras += TAU;                     // 0 na frente, 2π logo à frente dela
+    const brilho = Math.pow(1 - atras / TAU, 3.2);
+    const inten = 0.28 + 0.72 * brilho;
+    const cor = paleta[Math.min(N - 1, Math.floor(inten * N))];
+    const cx = Math.cos(a), sy = Math.sin(a);
+    px(bx + cx * rr, by + sy * rr, cor);
+    // a frente ganha corpo: o material se acumula onde o fluxo é mais forte
+    if (brilho > 0.42) px(bx + cx * (rr + 1), by + sy * (rr + 1), cor);
+    if (brilho > 0.78) px(bx + cx * (rr + 2), by + sy * (rr + 2), paleta[N - 1]);
   }
 
   // o corpo é claro: precisa de um fio de contorno para ter silhueta
