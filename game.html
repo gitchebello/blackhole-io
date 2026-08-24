@@ -72,6 +72,19 @@ const CFG = {
   MARTE_FORCA: 1,        // sem puxão extra: esticar o alcance já reforça o perto
   MARTE_CLARAO: 24,      // flash vermelho ao devorá-lo
 
+  /* Saturno — o dos anéis: vira uma torre de gelo por um tempo */
+  SATURNO_RAIO: 7,
+  SATURNO_ESPERA: 600,   // mesma frequência da Terra e de Marte (600 = 10s)
+  SATURNO_TIRO: 480,     // duração do poder (480 = 8s)
+  SATURNO_CADENCIA: 40,  // quadros entre um bloco e o outro
+  SATURNO_DANO: 1,       // estrelas que o oponente perde por bloco
+  SATURNO_VEL: 2.8,      // velocidade do bloco, em pixels de tela
+  SATURNO_MIRA: 0.022,   // correção de rumo por quadro: persegue de leve.
+                         // Em 0,055 o bloco virava teleguiado e acertava 90%
+  SATURNO_ALCANCE: 1.6,  // em telas de distância: longe demais não atira
+  SATURNO_RAIO_BLOCO: 3,
+  SATURNO_CLARAO: 24,
+
   NEBULOSAS: 10,          // nuvens de gás espalhadas pelo mapa; o resto é vácuo
 
   ROSTO: true,           // o buraco negro tem carinha
@@ -153,6 +166,9 @@ const COR = {
   discoV: ["#f3fdf7","#d9f7e6","#b4ecce","#8adfb2","#5ecb94","#3cae7b","#2c8f65","#1f7050"],
   glowTerra:"#5aa8e0",
   glowMarte:"#e8342a",
+  saturno: ["#fffdf0","#fff4cf","#ffe9a8","#f2d074","#d4ac4a","#a8842f"],
+  bloco:   ["#f2fcff","#cdeefb","#a2daf2","#74bfe0"],
+  glowSaturno:"#e8b53a",     // dourado, não amarelo pastel: o corpo já é claro
   marte:  ["#f4b98a","#e8875a","#d1603c","#a8422a"],
   ima:    "#e8734a",
   imaClarao:"#ffd0b8",
@@ -612,6 +628,47 @@ function desenharSpriteMarte() {
 }
 desenharSpriteMarte();
 
+/* ── sprite de Saturno: só o corpo, em amarelo pastel ────────
+   O anel não cabe aqui: ele passa por trás e por diante do planeta, então
+   é desenhado na hora, em duas metades, com o corpo no meio. */
+const SAT_D = CFG.SATURNO_RAIO * 2 + 1;
+const SAT_QUADROS = 8;
+const saturnoSprite = document.createElement("canvas");
+saturnoSprite.width = SAT_D * SAT_QUADROS; saturnoSprite.height = SAT_D;
+
+function desenharSpriteSaturno() {
+  const fx = saturnoSprite.getContext("2d");
+  const R = CFG.SATURNO_RAIO, c = R;
+  const S = COR.saturno;
+  const limbo = S[5];
+
+  for (let q = 0; q < SAT_QUADROS; q++) {
+    const giro = q * (Math.PI * 2 / SAT_QUADROS);
+    for (let y = 0; y < SAT_D; y++) {
+      const dy = y - c;
+      const w = meiaLinha(R, dy);
+      if (w < 0) continue;
+      for (let x = c - w; x <= c + w; x++) {
+        const dx = x - c;
+        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
+        let cor;
+        if (x === c - w || x === c + w) {
+          cor = limbo;
+        } else {
+          // faixas horizontais suaves, que é o que Saturno tem de marcante
+          const banda = Math.sin(dy * 1.5 + Math.sin(giro) * 0.5) * 0.5 + 0.5;
+          // faixa mais larga de tons: o corpo estava pálido demais e sumia
+          const t = limitar(luz * 0.62 + banda * 0.38, 0, 0.999);
+          cor = S[Math.min(4, Math.floor((1 - t) * 5.6))];
+        }
+        fx.fillStyle = cor;
+        fx.fillRect(q * SAT_D + x, y, 1, 1);
+      }
+    }
+  }
+}
+desenharSpriteSaturno();
+
 /* ── desenho em pixel cheio (sem antialias) ──────────────────── */
 function disco(cx, cy, raio, cor) {
   ctx.fillStyle = cor;
@@ -796,6 +853,7 @@ const rival = { x: 0, y: 0, vx: 0, vy: 0, ang: 0,
 let vencedor = null;
 let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, esperaTerra = 0, turbo = 0;
 let marte = null, esperaMarte = 0, ima = 0, flashIma = 0;
+let saturno = null, esperaSaturno = 0, tiro = 0, recargaTiro = 0, flashTiro = 0, blocos = [];
 let anuncio = null;
 let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, arco = 0, quadro = 0;
 let esperaColisao = 0, cadente = null, esperaCadente = 0;
@@ -880,6 +938,20 @@ function novoMarte() {
   return null;
 }
 
+function novoSaturno() {
+  const L = limites();
+  for (let tent = 0; tent < 40; tent++) {
+    const t = {
+      x: L.x0 + 20 + rnd() * (L.l - 40),
+      y: L.y0 + 20 + rnd() * (L.a - 40),
+      vx: (rnd() - 0.5) * 0.12, vy: (rnd() - 0.5) * 0.12,
+      quadro: 0
+    };
+    if (Math.hypot(t.x - buraco.x, t.y - buraco.y) > visaoL() * 0.35) return t;
+  }
+  return null;
+}
+
 function reiniciar() {
   buraco.nivel = 0; buraco.comidas = 0; buraco.progresso = 0;
   raioTela = CFG.RAIO_BASE; zoom = zoomAlvo = 1;
@@ -904,6 +976,8 @@ function reiniciar() {
 
   terra = novaTerra(); esperaTerra = 0;
   marte = null; esperaMarte = CFG.MARTE_ESPERA; ima = 0; flashIma = 0;
+  saturno = null; esperaSaturno = CFG.SATURNO_ESPERA;
+  tiro = 0; recargaTiro = 0; flashTiro = 0; blocos = [];
   anuncio = null;
   cam.x = buraco.x - visaoL() / 2;
   cam.y = buraco.y - visaoA() / 2;
@@ -976,7 +1050,7 @@ function passoRival(L) {
   const zr = zoomDoNivel(rival.nivel);
 
   const vivo = rival.alvo && (rival.alvo === terra || rival.alvo === marte ||
-                              estrelas.indexOf(rival.alvo) >= 0);
+                              rival.alvo === saturno || estrelas.indexOf(rival.alvo) >= 0);
   if (--rival.pensar <= 0 || !vivo) {
     rival.pensar = CFG.RIVAL_PENSAR + Math.floor(Math.random() * CFG.RIVAL_PENSAR);
     let melhor = null, md = Infinity;
@@ -986,6 +1060,7 @@ function passoRival(L) {
     }
     if (terra && Math.hypot(terra.x - rival.x, terra.y - rival.y) < md * 1.3) melhor = terra;
     if (marte && Math.hypot(marte.x - rival.x, marte.y - rival.y) < md * 1.3) melhor = marte;
+    if (saturno && Math.hypot(saturno.x - rival.x, saturno.y - rival.y) < md * 1.3) melhor = saturno;
     rival.alvo = melhor;
   }
   if (rival.alvo) {
@@ -1349,6 +1424,34 @@ function passo() {
     marte = novoMarte();
   }
 
+  /* — Saturno — */
+  if (saturno) {
+    saturno.quadro++;
+    saturno.x += saturno.vx / zoom; saturno.y += saturno.vy / zoom;
+    const rs = CFG.SATURNO_RAIO / zoom;
+    if (saturno.x < L.x0 + rs || saturno.x > L.x1 - rs) saturno.vx *= -1;
+    if (saturno.y < L.y0 + rs || saturno.y > L.y1 - rs) saturno.vy *= -1;
+    saturno.x = limitar(saturno.x, L.x0 + rs, L.x1 - rs);
+    saturno.y = limitar(saturno.y, L.y0 + rs, L.y1 - rs);
+    if (Math.hypot(saturno.x - buraco.x, saturno.y - buraco.y) < raioMundo() + rs * 0.4)
+      engolirSaturno(buraco);
+    else if (Math.hypot(saturno.x - rival.x, saturno.y - rival.y) < raioMundoNivel(rival.nivel) + rs * 0.4)
+      engolirSaturno(rival);
+  } else if (--esperaSaturno <= 0) {
+    saturno = novoSaturno();
+  }
+
+  /* — a torre de gelo atira enquanto o poder dura — */
+  if (tiro > 0) {
+    tiro--;
+    if (recargaTiro > 0) recargaTiro--;
+    const d = Math.hypot(rival.x - buraco.x, rival.y - buraco.y);
+    // só atira com o rival a uma distância que faça sentido: mirar do outro
+    // lado do mapa daria bloco viajando meio minuto até chegar
+    if (recargaTiro <= 0 && d < visaoL() * CFG.SATURNO_ALCANCE) atirarBloco();
+  }
+  passoBlocos(L);
+
   passoParticulas();
 
   /* — câmera — */
@@ -1387,6 +1490,7 @@ function passoParticulas() {
   if (rival.boca > 0) rival.boca--;
   if (flashTerra > 0) flashTerra--;
   if (flashIma > 0) flashIma--;
+  if (flashTiro > 0) flashTiro--;
   if (ima > 0) { ima--; faiscarIma(); if (quadro % 2 === 0) faiscarIma(); }
   if (flashEnjoo > 0) flashEnjoo--;
   if (buraco.surpresa > 0) buraco.surpresa--;
@@ -1527,6 +1631,83 @@ function engolirMarte(dono) {
   for (let k = 0; k < 24; k++) faiscarIma();
 }
 
+function engolirSaturno(dono) {
+  faiscar(saturno.x, saturno.y, 18, 2, 8);
+  saturno = null;
+  esperaSaturno = CFG.SATURNO_ESPERA;
+  if (cena !== "jogo") return;
+  dono.pulso = 1; dono.boca = 20;
+  if (dono !== buraco) return;                  // o rival só engole, como nos outros
+  tiro = CFG.SATURNO_TIRO;
+  recargaTiro = 0;
+  // dourado, e não o azul do gelo: o azul brigaria com o "SPEED UP" da Terra,
+  // e dourado liga o aviso a Saturno na hora
+  anunciar("ICE SHOT!", COR.saturno[4]);
+  tremor = 10;
+  flashTiro = CFG.SATURNO_CLARAO;
+  for (let k = 0; k < 20; k++) {
+    const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random()) / zoom;
+    faiscas.push({ x: buraco.x, y: buraco.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                   vida: 16 + Math.floor(Math.random() * 12), arrasto: 0.96, tipo: "enjoo",
+                   cor: COR.bloco[Math.floor(Math.random() * COR.bloco.length)] });
+  }
+}
+
+/* Um bloco sai da borda do buraco na direção do rival. Ele corrige o rumo de
+   leve a cada quadro: sem correção nenhuma erra quase sempre, e com correção
+   forte vira teleguiado e não dá para o rival escapar. */
+function atirarBloco() {
+  recargaTiro = CFG.SATURNO_CADENCIA;
+  const a = Math.atan2(rival.y - buraco.y, rival.x - buraco.x) +
+            (Math.random() - 0.5) * 0.3;
+  const v = CFG.SATURNO_VEL / zoom;
+  const r = raioMundo();
+  blocos.push({ x: buraco.x + Math.cos(a) * r, y: buraco.y + Math.sin(a) * r,
+                vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                giro: Math.random() * Math.PI, vida: 200 });
+  buraco.pulso = Math.max(buraco.pulso, 0.5);
+}
+
+function passoBlocos(L) {
+  const rr = CFG.SATURNO_RAIO_BLOCO / zoom;
+  for (let i = blocos.length - 1; i >= 0; i--) {
+    const g = blocos[i];
+    // persegue de leve: gira o vetor na direção do rival
+    const alvo = Math.atan2(rival.y - g.y, rival.x - g.x);
+    const atual = Math.atan2(g.vy, g.vx);
+    let dif = alvo - atual;
+    while (dif > Math.PI) dif -= Math.PI * 2;
+    while (dif < -Math.PI) dif += Math.PI * 2;
+    const ang = atual + limitar(dif, -CFG.SATURNO_MIRA, CFG.SATURNO_MIRA);
+    const v = Math.hypot(g.vx, g.vy);
+    g.vx = Math.cos(ang) * v; g.vy = Math.sin(ang) * v;
+    g.x += g.vx; g.y += g.vy;
+    g.giro += 0.14;
+    g.vida--;
+
+    if (Math.hypot(g.x - rival.x, g.y - rival.y) < raioMundoNivel(rival.nivel) + rr) {
+      const quantas = Math.min(CFG.SATURNO_DANO, rival.comidas);
+      if (quantas > 0) perderEstrelas(rival, quantas);
+      rival.pulso = 1; rival.boca = 14;
+      rival.surpresa = Math.max(rival.surpresa, 18);
+      tremor = Math.max(tremor, 6);
+      faiscar(g.x, g.y, 10, 2, 6);
+      for (let k = 0; k < 10; k++) {
+        const a = Math.random() * Math.PI * 2, s2 = (0.5 + Math.random()) / zoom;
+        faiscas.push({ x: g.x, y: g.y, vx: Math.cos(a) * s2, vy: Math.sin(a) * s2,
+                       vida: 12 + Math.floor(Math.random() * 10), arrasto: 0.94,
+                       tipo: "enjoo", cor: COR.bloco[Math.floor(Math.random() * 3)] });
+      }
+      aneis.push({ x: g.x, y: g.y, r: 2, vida: 14, total: 14, rival: true });
+      blocos.splice(i, 1);
+      continue;
+    }
+    const fora = 40 / zoom;
+    if (g.vida <= 0 || g.x < L.x0 - fora || g.x > L.x1 + fora ||
+        g.y < L.y0 - fora || g.y > L.y1 + fora) blocos.splice(i, 1);
+  }
+}
+
 /* poeira vermelha correndo PARA DENTRO do buraco: o ímã puxa, então as
    partículas dele vêm de fora para o centro, ao contrário das do turbo */
 function faiscarIma() {
@@ -1538,6 +1719,28 @@ function faiscarIma() {
                  vx: -Math.cos(a) * v, vy: -Math.sin(a) * v,
                  vida: 14 + Math.floor(Math.random() * 10), arrasto: 0.99, tipo: "raio",
                  cor: COR.imaPart[Math.floor(Math.random() * COR.imaPart.length)] });
+}
+
+/* O anel de Saturno em duas metades: a de trás sai antes do corpo, a da
+   frente depois. Sem isso o anel some atrás do planeta ou passa por cima
+   dele inteiro, e nos dois casos a leitura de "planeta com anel" se perde. */
+function anelSaturno(cx, cy, R, frente) {
+  // anel mais contido: com rx=2.05R o conjunto ficava quase o dobro da
+  // largura da Terra e de Marte, e Saturno parecia de outra escala
+  const rx = R * 1.75, ry = R * 0.52;
+  const ci = Math.cos(-0.22), si = Math.sin(-0.22);      // leve inclinação
+  // denso: com poucos passos a elipse sai pontilhada e o anel parece quebrado
+  const passos = Math.max(72, Math.ceil(rx * 11));
+  const faixas = [[1, COR.saturno[3]], [0.88, COR.saturno[2]], [0.76, COR.saturno[4]]];
+  for (let i = 0; i < passos; i++) {
+    const a = (i / passos) * Math.PI * 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    if ((sa > 0) !== frente) continue;
+    for (const [k, cor] of faixas) {
+      const ex = ca * rx * k, ey = sa * ry * k;
+      px(cx + ex * ci - ey * si, cy + ex * si + ey * ci, cor);
+    }
+  }
 }
 
 /* ── desenho ─────────────────────────────────────────────────── */
@@ -1633,6 +1836,43 @@ function desenharMundo() {
       const q = Math.floor(marte.quadro / 7) % MARTE_QUADROS;
       ctx.drawImage(marteSprite, q * MARTE_D, 0, MARTE_D, MARTE_D, x, y, MARTE_D, MARTE_D);
     }
+  }
+
+  /* Saturno */
+  if (saturno) {
+    const cxS = Math.round(paraTelaX(saturno.x));
+    const cyS = Math.round(paraTelaY(saturno.y));
+    const R = CFG.SATURNO_RAIO;
+    if (cxS > -R * 3 && cyS > -R * 3 && cxS < VL + R * 3 && cyS < VA + R * 3) {
+      const pS = 0.5 + 0.5 * Math.sin(quadro * 0.062 + 2.4);
+      for (let k = 4; k >= 1; k--) {            // glow dourado
+        ctx.globalAlpha = (0.11 + pS * 0.07) * k / 4;
+        disco(cxS, cyS, R + k * 2.2 + pS * 1.7, COR.glowSaturno);
+      }
+      ctx.globalAlpha = 1;
+      anelSaturno(cxS, cyS, R, false);          // metade de trás
+      const q = Math.floor(saturno.quadro / 7) % SAT_QUADROS;
+      ctx.drawImage(saturnoSprite, q * SAT_D, 0, SAT_D, SAT_D, cxS - R, cyS - R, SAT_D, SAT_D);
+      anelSaturno(cxS, cyS, R, true);           // metade da frente
+    }
+  }
+
+  /* os blocos de gelo a caminho do rival */
+  for (const g of blocos) {
+    const gx = paraTelaX(g.x), gy = paraTelaY(g.y);
+    ctx.globalAlpha = 0.35;
+    disco(gx, gy, CFG.SATURNO_RAIO_BLOCO + 2, COR.bloco[1]);
+    ctx.globalAlpha = 1;
+    // quadradinho girando: bloco de gelo, não bolinha
+    const c1 = Math.cos(g.giro), s1 = Math.sin(g.giro);
+    const L2 = CFG.SATURNO_RAIO_BLOCO;
+    for (const [ux, uy] of [[-1,-1],[1,-1],[1,1],[-1,1]]) {
+      const qx = gx + (ux * c1 - uy * s1) * L2;
+      const qy = gy + (ux * s1 + uy * c1) * L2;
+      px(qx, qy, COR.bloco[3]);
+    }
+    disco(gx, gy, L2 - 1, COR.bloco[0]);
+    px(gx, gy, COR.bloco[2]);
   }
 
   /* o alcance do ímã, desenhado como um anel pontilhado que respira */
@@ -1769,6 +2009,12 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
       ctx.fillStyle = COR.borda; ctx.fillRect(x0, y0, l, 2);
       ctx.fillStyle = COR.ima;
       ctx.fillRect(x0, y0, Math.round(l * ima / CFG.MARTE_IMA), 2);
+      y0 += 4;
+    }
+    if (tiro > 0) {
+      ctx.fillStyle = COR.borda; ctx.fillRect(x0, y0, l, 2);
+      ctx.fillStyle = COR.bloco[3];
+      ctx.fillRect(x0, y0, Math.round(l * tiro / CFG.SATURNO_TIRO), 2);
       y0 += 4;
     }
     if (buraco.enjoo > 0) {
@@ -1930,6 +2176,15 @@ function desenharClaraoIma() {
   const p = flashIma / CFG.MARTE_CLARAO;
   ctx.globalAlpha = Math.pow(p, 1.4) * 0.7;
   ctx.fillStyle = COR.imaClarao;
+  ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+}
+
+function desenharClaraoTiro() {
+  if (flashTiro <= 0) return;
+  const p = flashTiro / CFG.SATURNO_CLARAO;
+  ctx.globalAlpha = Math.pow(p, 1.4) * 0.7;
+  ctx.fillStyle = COR.bloco[0];
   ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
 }
@@ -2291,6 +2546,7 @@ function desenhar() {
   desenharArcoIris();
   desenharClaraoTerra();
   desenharClaraoIma();
+  desenharClaraoTiro();
   desenharClaraoEnjoo();
   desenharBrilhoLateral();
   vinheta();
