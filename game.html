@@ -59,14 +59,13 @@ const CFG = {
   GIRO_SUCCAO: 1.2,      // quanto a estrela rodopia enquanto é sugada
 
   /* Terra */
-  TERRA_RAIO: 10,        // raio aparente da Terra: com R pequeno o degrau
-                         // da linha aparece e a bolinha fica facetada
+  TERRA_RAIO: 7,         // raio aparente da Terra, na tela
   TERRA_ESPERA: 600,     // quadros até uma nova Terra aparecer (600 = 10s)
   TERRA_TURBO: 600,      // duração do turbo (600 = 10s)
   TERRA_FATOR: 1.5,      // multiplicador de velocidade do turbo
 
   /* Marte — o planeta vermelho: vira ímã por um tempo */
-  MARTE_RAIO: 10,        // do mesmo tamanho da Terra
+  MARTE_RAIO: 7,         // do mesmo tamanho da Terra
   MARTE_ESPERA: 600,     // mesma frequência da Terra (600 = 10s)
   MARTE_IMA: 300,        // duração do ímã (300 = 5s)
   MARTE_ALCANCE: 1.35,   // quanto o alcance de sucção estica no ímã
@@ -532,11 +531,14 @@ function desenharSpriteTerra() {
         let cor;
         // o fio de contorno acompanha a linha, não o raio: fica de 1 px
         // uniforme em toda a volta em vez de engrossar em cima e embaixo
-        const naBorda = (x === c - w || x === c + w) ||
-                        Math.abs(dy) === R || meiaLinha(R, dy + Math.sign(dy || 1)) < w - 1;
+        // só a ponta de cada linha: o fio grosso em cima e embaixo é o que
+        // fazia o degrau da esfera saltar aos olhos
+        const naBorda = (x === c - w || x === c + w);
         if (naBorda) {
           cor = limbo;
-        } else if (Math.abs(dy) > R - 2 && Math.abs(dx) < R * 0.55) {
+        } else if (Math.abs(dy) > R * 0.62 && Math.abs(dx) < w * 0.5) {
+          // calota medida pela LARGURA da linha, não pelo raio: assim ela
+          // afina junto com o polo em vez de virar uma tampa branca
           cor = gelo[tom];
         } else {
           const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
@@ -567,7 +569,9 @@ function desenharSpriteMarte() {
   const fx = marteSprite.getContext("2d");
   const R = CFG.MARTE_RAIO, c = R;
   const vermelho = ["#c2231c","#e33a2b","#f4614a"];   // o corpo, saturado
-  const mar      = ["#8c1414","#a82018","#c23528"];   // as regiões escuras
+  const mar      = ["#a1201a","#bd2f25","#d44a3a"];   // regiões escuras, mas perto
+                                                     // do corpo: com contraste alto
+                                                     // a mancha vira vinco na esfera
   const gelo     = ["#f0e4e0","#faf2ef","#ffffff"];
   const limbo    = "#7a0f10";
 
@@ -582,18 +586,21 @@ function desenharSpriteMarte() {
         const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
         const tom = luz > 0.68 ? 2 : luz > 0.36 ? 1 : 0;
         let cor;
-        const naBorda = (x === c - w || x === c + w) ||
-                        Math.abs(dy) === R || meiaLinha(R, dy + Math.sign(dy || 1)) < w - 1;
+        // só a ponta de cada linha: o fio grosso em cima e embaixo é o que
+        // fazia o degrau da esfera saltar aos olhos
+        const naBorda = (x === c - w || x === c + w);
         if (naBorda) {
           cor = limbo;
-        } else if (dy < -(R - 2) && Math.abs(dx) < R * 0.6) {
+        } else if (dy < -R * 0.66 && Math.abs(dx) < w * 0.45) {
           cor = gelo[tom];                      // calota norte, só uma
         } else {
           const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
           // faixas largas: duas senoides de latitude moduladas pela longitude
-          const faixa = Math.sin(dy * 0.62 + Math.sin(lon + giro) * 0.9) +
-                        0.6 * Math.sin(dy * 0.29 - lon * 1.4 + giro);
-          cor = faixa > 0.55 ? mar[tom] : vermelho[tom];
+          // frequência alta o bastante para caber 2 ou 3 faixas num raio de 7:
+          // com faixa larga demais sobra uma mancha só, e ela lê como sujeira
+          const faixa = Math.sin(dy * 1.15 + Math.sin(lon + giro) * 1.1) +
+                        0.55 * Math.sin(dy * 0.5 - lon * 1.7 + giro);
+          cor = faixa > 0.35 ? mar[tom] : vermelho[tom];
         }
         fx.fillStyle = cor;
         fx.fillRect(q * MARTE_D + x, y, 1, 1);
@@ -1607,7 +1614,6 @@ function desenharMundo() {
       ctx.globalAlpha = 1;
       const q = Math.floor(terra.quadro / 7) % TERRA_QUADROS;
       ctx.drawImage(terraSprite, q * TERRA_D, 0, TERRA_D, TERRA_D, x, y, TERRA_D, TERRA_D);
-      if (CFG.ROSTO) rostinho(x + CFG.TERRA_RAIO, y + CFG.TERRA_RAIO - 1);
     }
   }
 
@@ -1626,7 +1632,6 @@ function desenharMundo() {
       ctx.globalAlpha = 1;
       const q = Math.floor(marte.quadro / 7) % MARTE_QUADROS;
       ctx.drawImage(marteSprite, q * MARTE_D, 0, MARTE_D, MARTE_D, x, y, MARTE_D, MARTE_D);
-      if (CFG.ROSTO) rostinho(x + CFG.MARTE_RAIO, y + CFG.MARTE_RAIO - 1);
     }
   }
 
@@ -1844,19 +1849,6 @@ function desenharBuraco() {
                      COR.discoR, COR.rivalHalo, COR.rivalContorno, COR.rivalBlush, false);
   desenharPersonagem(buraco, raioTela,
                      COR.disco, COR.halo, COR.contorno, COR.blush, true);
-}
-
-/* a carinha dos planetas: dois olhos e um sorriso, com um fio branco atrás
-   para não sumir no oceano nem na poeira vermelha */
-function rostinho(cx, cy) {
-  const c = COR.rosto, B = "#ffffff";
-  const traco = [[-3,0],[-3,1],[3,0],[3,1],[-2,3],[-1,4],[0,4],[1,4],[2,3]];
-  // um fio branco de 1 px em volta do traço, e só. Um bloco branco atrás
-  // some com o planeta e vira máscara em vez de carinha
-  for (const [ox, oy] of traco)
-    for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]])
-      px(cx + ox + dx, cy + oy + dy, B);
-  for (const [ox, oy] of traco) px(cx + ox, cy + oy, c);
 }
 
 /* a carinha: olhos que espiam para onde ele está indo, bochechas e um sorriso */
