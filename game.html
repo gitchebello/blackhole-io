@@ -50,8 +50,8 @@ const CFG = {
   /* movimento (em pixels de TELA por quadro: o mundo já compensa o zoom) */
   ACEL: 0.34,
   ATRITO: 0.93,
-  VEL_MAX: 1.9,
-  VEL_PERDA: 0.05,       // perda de velocidade aparente por nível
+  VEL_MAX: 2.2,
+  VEL_PERDA: 0.025,       // perda de velocidade aparente por nível
 
   /* sucção */
   ALCANCE_SUCCAO: 3.6,   // raio de atração, em múltiplos do raio do buraco
@@ -63,6 +63,14 @@ const CFG = {
   TERRA_ESPERA: 600,     // quadros até uma nova Terra aparecer (600 = 10s)
   TERRA_TURBO: 600,      // duração do turbo (600 = 10s)
   TERRA_FATOR: 1.5,      // multiplicador de velocidade do turbo
+
+  /* Marte — o planeta vermelho: vira ímã por um tempo */
+  MARTE_RAIO: 6,         // um pouco menor que a Terra
+  MARTE_ESPERA: 600,     // mesma frequência da Terra (600 = 10s)
+  MARTE_IMA: 300,        // duração do ímã (300 = 5s)
+  MARTE_ALCANCE: 1.35,   // quanto o alcance de sucção estica no ímã
+  MARTE_FORCA: 1,        // sem puxão extra: esticar o alcance já reforça o perto
+  MARTE_CLARAO: 24,      // flash vermelho ao devorá-lo
 
   NEBULOSAS: 10,          // nuvens de gás espalhadas pelo mapa; o resto é vácuo
 
@@ -96,13 +104,13 @@ const CFG = {
   COLISAO_CUSTA_NIVEL: true,   // a perda também tira progresso, não só o contador
 
   /* estrela cadente */
-  CADENTE_INTERVALO: 900,      // 900 quadros = 15 segundos
+  CADENTE_INTERVALO: 480,      // 480 quadros = 8 segundos
   CADENTE_PREMIO: 10,          // estrelas ganhas ao pegá-la
   CADENTE_VEL: 3.4,
   CADENTE_RAIO: 7,
 
   /* cometa: o de rabo azul, que congela quem encostar */
-  COMETA_INTERVALO: 600,   // 600 quadros = 10 segundos
+  COMETA_INTERVALO: 360,   // 360 quadros = 6 segundos
   COMETA_VEL: 2.5,         // mais devagar que a cadente: dá para desviar
   COMETA_RAIO: 11,        // bem maior que a cadente: é obstáculo, não prêmio
   COMETA_GELO: 300,        // duração do congelamento (300 = 5s)
@@ -138,6 +146,10 @@ const COR = {
   cometa: ["#f2fbff","#c8e9fa","#96d3f2","#63b4e4","#3d90c8"],
   gelo:   "#8fd4f0",
   geloClarao:"#dcf2fd",
+  marte:  ["#f4b98a","#e8875a","#d1603c","#a8422a"],
+  ima:    "#e8734a",
+  imaClarao:"#ffd0b8",
+  imaPart:["#ffc9a3","#f4a06a","#e8734a"],
   turbo:  "#4fb8e0",
   turboClarao:"#bfe4f7",
   turboPart:["#a9d2f2","#7fb9e4","#5aa4dc","#ffd98a","#ffc75c","#f0b53f"],
@@ -525,6 +537,48 @@ function desenharSpriteTerra() {
 }
 desenharSpriteTerra();
 
+/* ── sprite de Marte: mesma esfera, em ferrugem ──────────────
+   Vermelho poeirento com manchas escuras e uma calota branca só. */
+const MARTE_D = CFG.MARTE_RAIO * 2 + 1;
+const MARTE_QUADROS = 8;
+const marteSprite = document.createElement("canvas");
+marteSprite.width = MARTE_D * MARTE_QUADROS; marteSprite.height = MARTE_D;
+
+function desenharSpriteMarte() {
+  const fx = marteSprite.getContext("2d");
+  const R = CFG.MARTE_RAIO, c = R;
+  const areia  = ["#d66b3c","#ee9160","#ffbb8e"];   // a poeira do corpo
+  const mancha = ["#9c4429","#b85c38","#d17d55"];   // regiões escuras
+  const gelo   = ["#e8dcd4","#f6efea","#ffffff"];   // a calota
+  const limbo  = "#8f3a22";
+
+  for (let q = 0; q < MARTE_QUADROS; q++) {
+    const giro = q * (12 / MARTE_QUADROS);
+    for (let y = 0; y < MARTE_D; y++) {
+      for (let x = 0; x < MARTE_D; x++) {
+        const dx = x - c, dy = y - c;
+        const dist = Math.hypot(dx, dy);
+        if (dist > R + 0.35) continue;
+        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
+        const tom = luz > 0.68 ? 2 : luz > 0.36 ? 1 : 0;
+        let cor;
+        if (dist > R - 0.75) {
+          cor = limbo;
+        } else if (dy < -(R - 1.4) && Math.abs(dx) < R * 0.45) {
+          cor = gelo[tom];                          // só a calota norte
+        } else {
+          const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
+          const n = fractal(lon * 3.2 + giro, y * 0.36, CFG.SEMENTE + 3310, 2);
+          cor = n > 0.63 ? mancha[tom] : areia[tom];   // menos mancha: fica vermelho, nao marrom
+        }
+        fx.fillStyle = cor;
+        fx.fillRect(q * MARTE_D + x, y, 1, 1);
+      }
+    }
+  }
+}
+desenharSpriteMarte();
+
 /* ── desenho em pixel cheio (sem antialias) ──────────────────── */
 function disco(cx, cy, raio, cor) {
   ctx.fillStyle = cor;
@@ -691,6 +745,7 @@ const rival = { x: 0, y: 0, vx: 0, vy: 0, ang: 0,
                 alvo: null, pensar: 0 };
 let vencedor = null;
 let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, esperaTerra = 0, turbo = 0;
+let marte = null, esperaMarte = 0, ima = 0, flashIma = 0;
 let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, arco = 0, quadro = 0;
 let esperaColisao = 0, cadente = null, esperaCadente = 0;
 let cometa = null, esperaCometa = 0, flashGelo = 0;
@@ -760,6 +815,20 @@ function novaTerra() {
 }
 
 
+function novoMarte() {
+  const L = limites();
+  for (let tent = 0; tent < 40; tent++) {
+    const t = {
+      x: L.x0 + 20 + rnd() * (L.l - 40),
+      y: L.y0 + 20 + rnd() * (L.a - 40),
+      vx: (rnd() - 0.5) * 0.14, vy: (rnd() - 0.5) * 0.14,
+      quadro: 0
+    };
+    if (Math.hypot(t.x - buraco.x, t.y - buraco.y) > visaoL() * 0.35) return t;
+  }
+  return null;
+}
+
 function reiniciar() {
   buraco.nivel = 0; buraco.comidas = 0; buraco.progresso = 0;
   raioTela = CFG.RAIO_BASE; zoom = zoomAlvo = 1;
@@ -782,6 +851,7 @@ function reiniciar() {
   vencedor = null; flashTerra = 0;
 
   terra = novaTerra(); esperaTerra = 0;
+  marte = null; esperaMarte = CFG.MARTE_ESPERA; ima = 0; flashIma = 0;
   cam.x = buraco.x - visaoL() / 2;
   cam.y = buraco.y - visaoA() / 2;
 }
@@ -852,7 +922,8 @@ function passoRival(L) {
   const rm = raioMundoNivel(rival.nivel);
   const zr = zoomDoNivel(rival.nivel);
 
-  const vivo = rival.alvo && (rival.alvo === terra || estrelas.indexOf(rival.alvo) >= 0);
+  const vivo = rival.alvo && (rival.alvo === terra || rival.alvo === marte ||
+                              estrelas.indexOf(rival.alvo) >= 0);
   if (--rival.pensar <= 0 || !vivo) {
     rival.pensar = CFG.RIVAL_PENSAR + Math.floor(Math.random() * CFG.RIVAL_PENSAR);
     let melhor = null, md = Infinity;
@@ -861,6 +932,7 @@ function passoRival(L) {
       if (d < md) { md = d; melhor = e; }
     }
     if (terra && Math.hypot(terra.x - rival.x, terra.y - rival.y) < md * 1.3) melhor = terra;
+    if (marte && Math.hypot(marte.x - rival.x, marte.y - rival.y) < md * 1.3) melhor = marte;
     rival.alvo = melhor;
   }
   if (rival.alvo) {
@@ -1146,7 +1218,11 @@ function passo() {
     { quem: buraco, x: buraco.x, y: buraco.y, rm: raioMundo() },
     { quem: rival,  x: rival.x,  y: rival.y,  rm: raioMundoNivel(rival.nivel) }
   ];
-  for (const g of sugadores) g.alc = g.rm * CFG.ALCANCE_SUCCAO;
+  // o ímã de Marte estica só o alcance do jogador, e por pouco tempo:
+  // esticar demais faria as estrelas virem sozinhas e tirava a graça de mirar
+  sugadores[0].alc = sugadores[0].rm * CFG.ALCANCE_SUCCAO *
+                     (ima > 0 ? CFG.MARTE_ALCANCE : 1);
+  sugadores[1].alc = sugadores[1].rm * CFG.ALCANCE_SUCCAO;
 
   for (let i = estrelas.length - 1; i >= 0; i--) {
     const e = estrelas[i];
@@ -1163,7 +1239,8 @@ function passo() {
       e.presa = true;
       e.sx = dono.x; e.sy = dono.y; e.salc = dono.alc;
       const dx = dono.x - e.x, dy = dono.y - e.y, d = dDono;
-      const forca = (CFG.FORCA_SUCCAO * (1 - melhor) + 0.02) / zoom;
+      const puxao = dono.quem === buraco && ima > 0 ? CFG.MARTE_FORCA : 1;
+      const forca = (CFG.FORCA_SUCCAO * puxao * (1 - melhor) + 0.02) / zoom;
       e.vx += (dx / d) * forca; e.vy += (dy / d) * forca;
       // gira a estrela em torno do sugador: o mergulho vira espiral.
       // É um giro do POSICIONAMENTO, não uma força lateral — força lateral
@@ -1198,6 +1275,23 @@ function passo() {
       engolirTerra(rival);
   } else if (--esperaTerra <= 0) {
     terra = novaTerra();
+  }
+
+  /* — Marte — */
+  if (marte) {
+    marte.quadro++;
+    marte.x += marte.vx / zoom; marte.y += marte.vy / zoom;
+    const rm2 = CFG.MARTE_RAIO / zoom;
+    if (marte.x < L.x0 + rm2 || marte.x > L.x1 - rm2) marte.vx *= -1;
+    if (marte.y < L.y0 + rm2 || marte.y > L.y1 - rm2) marte.vy *= -1;
+    marte.x = limitar(marte.x, L.x0 + rm2, L.x1 - rm2);
+    marte.y = limitar(marte.y, L.y0 + rm2, L.y1 - rm2);
+    if (Math.hypot(marte.x - buraco.x, marte.y - buraco.y) < raioMundo() + rm2 * 0.4)
+      engolirMarte(buraco);
+    else if (Math.hypot(marte.x - rival.x, marte.y - rival.y) < raioMundoNivel(rival.nivel) + rm2 * 0.4)
+      engolirMarte(rival);
+  } else if (--esperaMarte <= 0) {
+    marte = novoMarte();
   }
 
   passoParticulas();
@@ -1237,6 +1331,8 @@ function passoParticulas() {
   if (buraco.boca > 0) buraco.boca--;
   if (rival.boca > 0) rival.boca--;
   if (flashTerra > 0) flashTerra--;
+  if (flashIma > 0) flashIma--;
+  if (ima > 0) { ima--; faiscarIma(); if (quadro % 2 === 0) faiscarIma(); }
   if (flashGelo > 0) flashGelo--;
   if (buraco.gelo > 0) {
     buraco.gelo--;
@@ -1358,6 +1454,33 @@ function engolirTerra(dono) {
 
 
 
+function engolirMarte(dono) {
+  faiscar(marte.x, marte.y, 18, 2, 8);
+  marte = null;
+  esperaMarte = CFG.MARTE_ESPERA;
+  if (cena !== "jogo") return;
+  dono.pulso = 1; dono.boca = 20;
+  if (dono !== buraco) return;                  // o rival só engole, como na Terra
+  ima = CFG.MARTE_IMA;
+  tremor = 7;
+  flashIma = CFG.MARTE_CLARAO;
+  aneis.push({ x: buraco.x, y: buraco.y, r: 3, vida: 24, total: 24, rival: false });
+  for (let k = 0; k < 24; k++) faiscarIma();
+}
+
+/* poeira vermelha correndo PARA DENTRO do buraco: o ímã puxa, então as
+   partículas dele vêm de fora para o centro, ao contrário das do turbo */
+function faiscarIma() {
+  const alc = raioMundo() * CFG.ALCANCE_SUCCAO * CFG.MARTE_ALCANCE;
+  const a = Math.random() * Math.PI * 2;
+  const d = raioMundo() + Math.random() * (alc - raioMundo());
+  const v = (0.5 + Math.random() * 0.9) / zoom;
+  faiscas.push({ x: buraco.x + Math.cos(a) * d, y: buraco.y + Math.sin(a) * d,
+                 vx: -Math.cos(a) * v, vy: -Math.sin(a) * v,
+                 vida: 14 + Math.floor(Math.random() * 10), arrasto: 0.99, tipo: "raio",
+                 cor: COR.imaPart[Math.floor(Math.random() * COR.imaPart.length)] });
+}
+
 /* ── desenho ─────────────────────────────────────────────────── */
 const paraTelaX = wx => (wx - cam.x) * zoom;
 const paraTelaY = wy => (wy - cam.y) * zoom;
@@ -1435,6 +1558,39 @@ function desenharMundo() {
     }
   }
 
+  /* Marte */
+  if (marte) {
+    const x = Math.round(paraTelaX(marte.x)) - CFG.MARTE_RAIO;
+    const y = Math.round(paraTelaY(marte.y)) - CFG.MARTE_RAIO;
+    if (x > -MARTE_D && y > -MARTE_D && x < VL && y < VA) {
+      ctx.globalAlpha = 0.3;
+      disco(x + CFG.MARTE_RAIO, y + CFG.MARTE_RAIO, CFG.MARTE_RAIO + 3, COR.imaClarao);
+      ctx.globalAlpha = 1;
+      const q = Math.floor(marte.quadro / 7) % MARTE_QUADROS;
+      ctx.drawImage(marteSprite, q * MARTE_D, 0, MARTE_D, MARTE_D, x, y, MARTE_D, MARTE_D);
+      if (CFG.ROSTO) {                       // Marte também tem carinha
+        const cxM = x + CFG.MARTE_RAIO, cyM = y + CFG.MARTE_RAIO - 1;
+        px(cxM - 2, cyM, COR.rosto); px(cxM + 2, cyM, COR.rosto);
+        px(cxM - 1, cyM + 2, COR.rosto); px(cxM, cyM + 3, COR.rosto); px(cxM + 1, cyM + 2, COR.rosto);
+      }
+    }
+  }
+
+  /* o alcance do ímã, desenhado como um anel pontilhado que respira */
+  if (ima > 0) {
+    const q = Math.min(1, ima / 40);
+    const rr = raioMundo() * CFG.ALCANCE_SUCCAO * CFG.MARTE_ALCANCE * zoom;
+    const passos = Math.max(24, Math.ceil(rr * 2.2));
+    ctx.globalAlpha = (0.3 + 0.2 * Math.sin(quadro * 0.16)) * q;
+    for (let i = 0; i < passos; i++) {
+      if (i % 2) continue;
+      const a = (i / passos) * Math.PI * 2 + quadro * 0.02;
+      px(paraTelaX(buraco.x) + Math.cos(a) * rr,
+         paraTelaY(buraco.y) + Math.sin(a) * rr, COR.ima);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   /* faíscas */
   for (const f of faiscas) {
     const fx = paraTelaX(f.x), fy = paraTelaY(f.y);
@@ -1485,29 +1641,20 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   disco(bx, by, r + 5, halo);
   ctx.globalAlpha = 1;
 
-  // Disco de acreção: um círculo simples, com a frente clara liderando o giro.
-  // A intensidade de cada ponto vem do quanto ele ficou PARA TRÁS da frente,
-  // e não de um seno em volta do anel. A diferença é que assim a borda de
-  // ataque é um corte seco e o rastro se apaga devagar atrás dela — é isso
-  // que dá o sentido do fluxo. Com seno, os dois lados são simétricos e o
-  // anel parece só piscar.
-  const giro = quadro * (comTurbo && turbo > 0 ? 0.075 : 0.034);
+  // anel de acreção: duas voltas, fortes de um lado e apagadas do outro
+  const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04);
   const N = paleta.length;
-  const rr = r + 1;
-  const TAU = Math.PI * 2;
-  const passos = Math.max(24, Math.ceil(rr * 8));
-  for (let i = 0; i < passos; i++) {
-    const a = (i / passos) * TAU;
-    let atras = (giro - a) % TAU;
-    if (atras < 0) atras += TAU;                     // 0 na frente, 2π logo à frente dela
-    const brilho = Math.pow(1 - atras / TAU, 3.2);
-    const inten = 0.28 + 0.72 * brilho;
-    const cor = paleta[Math.min(N - 1, Math.floor(inten * N))];
-    const cx = Math.cos(a), sy = Math.sin(a);
-    px(bx + cx * rr, by + sy * rr, cor);
-    // a frente ganha corpo: o material se acumula onde o fluxo é mais forte
-    if (brilho > 0.42) px(bx + cx * (rr + 1), by + sy * (rr + 1), cor);
-    if (brilho > 0.78) px(bx + cx * (rr + 2), by + sy * (rr + 2), paleta[N - 1]);
+  for (let k = 0; k < 2; k++) {
+    const rr = r + 1 + k;
+    const passos = Math.max(20, Math.ceil(rr * 7));
+    for (let i = 0; i < passos; i++) {
+      const a = (i / passos) * Math.PI * 2;
+      const lado = 0.5 + 0.5 * Math.sin(a - giro);
+      const inten = (0.34 + 0.66 * lado) * (1 - k * 0.3);
+      if (inten < 0.3) continue;
+      px(bx + Math.cos(a) * rr, by + Math.sin(a) * rr,
+         paleta[Math.min(N - 1, Math.floor(inten * N))]);
+    }
   }
 
   // o corpo é claro: precisa de um fio de contorno para ter silhueta
@@ -1544,6 +1691,12 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
       ctx.fillStyle = COR.borda; ctx.fillRect(x0, y0, l, 2);
       ctx.fillStyle = COR.turbo;
       ctx.fillRect(x0, y0, Math.round(l * turbo / CFG.TERRA_TURBO), 2);
+      y0 += 4;
+    }
+    if (ima > 0) {
+      ctx.fillStyle = COR.borda; ctx.fillRect(x0, y0, l, 2);
+      ctx.fillStyle = COR.ima;
+      ctx.fillRect(x0, y0, Math.round(l * ima / CFG.MARTE_IMA), 2);
       y0 += 4;
     }
     if (buraco.gelo > 0) {
@@ -1678,6 +1831,15 @@ function desenharClaraoTerra() {
 }
 
 
+
+function desenharClaraoIma() {
+  if (flashIma <= 0) return;
+  const p = flashIma / CFG.MARTE_CLARAO;
+  ctx.globalAlpha = Math.pow(p, 1.4) * 0.7;
+  ctx.fillStyle = COR.imaClarao;
+  ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+}
 
 function desenharClaraoGelo() {
   if (flashGelo > 0) {
@@ -2004,6 +2166,7 @@ function desenhar() {
   desenharMundo();
   desenharArcoIris();
   desenharClaraoTerra();
+  desenharClaraoIma();
   desenharClaraoGelo();
   desenharBrilhoLateral();
   vinheta();
