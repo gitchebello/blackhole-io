@@ -59,13 +59,14 @@ const CFG = {
   GIRO_SUCCAO: 1.2,      // quanto a estrela rodopia enquanto é sugada
 
   /* Terra */
-  TERRA_RAIO: 7,         // raio aparente da Terra, na tela
+  TERRA_RAIO: 10,        // raio aparente da Terra: com R pequeno o degrau
+                         // da linha aparece e a bolinha fica facetada
   TERRA_ESPERA: 600,     // quadros até uma nova Terra aparecer (600 = 10s)
   TERRA_TURBO: 600,      // duração do turbo (600 = 10s)
   TERRA_FATOR: 1.5,      // multiplicador de velocidade do turbo
 
   /* Marte — o planeta vermelho: vira ímã por um tempo */
-  MARTE_RAIO: 6,         // um pouco menor que a Terra
+  MARTE_RAIO: 10,        // do mesmo tamanho da Terra
   MARTE_ESPERA: 600,     // mesma frequência da Terra (600 = 10s)
   MARTE_IMA: 300,        // duração do ímã (300 = 5s)
   MARTE_ALCANCE: 1.35,   // quanto o alcance de sucção estica no ímã
@@ -100,7 +101,8 @@ const CFG = {
   COLISAO_ARRASTO: 0.977,// atrito enquanto voam: menor que o normal, vão longe
   COLISAO_ESPERA: 50,    // quadros de carência para não trombar em sequência
   COLISAO_SURPRESA: 50,  // quadros de cara de espanto depois da pancada
-  COLISAO_TREMOR: 38,
+  ANUNCIO: 80,           // quadros que o aviso do efeito fica na tela
+  COLISAO_TREMOR: 52,
   COLISAO_ABERR: 44,
   COLISAO_CUSTA_NIVEL: true,   // a perda também tira progresso, não só o contador
 
@@ -113,7 +115,7 @@ const CFG = {
   /* cometa: o de rabo verde, que deixa enjoado quem encostar */
   COMETA_INTERVALO: 360,   // 360 quadros = 6 segundos
   COMETA_VEL: 2.5,         // mais devagar que a cadente: dá para desviar
-  COMETA_RAIO: 11,        // bem maior que a cadente: é obstáculo, não prêmio
+  COMETA_RAIO: 14,        // bem maior que a cadente: é obstáculo, não prêmio
   COMETA_ENJOO: 300,        // duração do enjoo (300 = 5s)
   COMETA_FREIO: 0.75,      // fica com 75% da velocidade enquanto durar
   COMETA_RABO: 34,         // comprimento do rastro azul
@@ -148,7 +150,10 @@ const COR = {
   cometa: ["#f3fdf7","#cdf4de","#a0e7c2","#6ed4a4","#42b583"],
   enjoo:  "#7ed4a6",
   enjooClarao:"#dcf7e9",
-  enjooRosto:"#4f8f70",     // a carinha fica esverdeada enquanto passa mal
+  // anel de acreção enquanto está enjoado: mesma escada de tons do rosa
+  discoV: ["#f3fdf7","#d9f7e6","#b4ecce","#8adfb2","#5ecb94","#3cae7b","#2c8f65","#1f7050"],
+  glowTerra:"#5aa8e0",
+  glowMarte:"#e8342a",
   marte:  ["#f4b98a","#e8875a","#d1603c","#a8422a"],
   ima:    "#e8734a",
   imaClarao:"#ffd0b8",
@@ -491,40 +496,49 @@ function camadaAtual() {
   return melhor;
 }
 
-/* ── sprite da Terra: 8 quadros de rotação, desenhados pixel a pixel ── */
+/* ── sprite da Terra: 8 quadros de rotação, desenhados pixel a pixel ──
+   A silhueta é montada linha a linha com a MESMA regra do disco() do jogo
+   (largura = round(sqrt(R²-dy²))). Desenhar por distância euclidiana dava um
+   contorno diferente do resto e a bolinha parecia recortada em quadrado. */
 const TERRA_D = CFG.TERRA_RAIO * 2 + 1;
 const TERRA_QUADROS = 8;
 const terraSprite = document.createElement("canvas");
 terraSprite.width = TERRA_D * TERRA_QUADROS; terraSprite.height = TERRA_D;
 
+/* largura da linha dy de um círculo de raio R, do jeito do disco() */
+function meiaLinha(R, dy) {
+  const f = R * R - dy * dy;
+  return f <= 0 ? -1 : Math.floor(Math.sqrt(f) + 0.5);
+}
+
 function desenharSpriteTerra() {
   const fx = terraSprite.getContext("2d");
   const R = CFG.TERRA_RAIO, c = R;
-  // 3 tons por material: o do meio é a cor local, os outros são luz e sombra
-  const oceano = ["#5a9ccc","#7fb9e4","#a3d2f2"];
+  const oceano = ["#4f93c9","#74b4e2","#9dd0f2"];
   const terra  = ["#3f9e74","#5cbf92","#82d9b0"];
   const gelo   = ["#d2ecf8","#e8f6ff","#ffffff"];
-  const limbo  = "#3f7ba8";                     // borda mais forte: dá volume à esfera
+  const limbo  = "#3a76a6";
 
   for (let q = 0; q < TERRA_QUADROS; q++) {
-    const giro = q * (12 / TERRA_QUADROS);      // continentes deslizando
+    const giro = q * (12 / TERRA_QUADROS);
     for (let y = 0; y < TERRA_D; y++) {
-      for (let x = 0; x < TERRA_D; x++) {
-        const dx = x - c, dy = y - c;
-        const dist = Math.hypot(dx, dy);
-        if (dist > R + 0.35) continue;
-
-        // luz vindo do alto-esquerda, como no resto do jogo
+      const dy = y - c;
+      const w = meiaLinha(R, dy);
+      if (w < 0) continue;
+      for (let x = c - w; x <= c + w; x++) {
+        const dx = x - c;
         const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
         const tom = luz > 0.68 ? 2 : luz > 0.36 ? 1 : 0;
-
         let cor;
-        if (dist > R - 0.75) {
-          cor = limbo;                          // fio escuro em toda a volta
-        } else if (Math.abs(dy) > R - 1.6 && Math.abs(dx) < R * 0.5) {
-          cor = gelo[tom];                      // calotas, pequenas e sombreadas
+        // o fio de contorno acompanha a linha, não o raio: fica de 1 px
+        // uniforme em toda a volta em vez de engrossar em cima e embaixo
+        const naBorda = (x === c - w || x === c + w) ||
+                        Math.abs(dy) === R || meiaLinha(R, dy + Math.sign(dy || 1)) < w - 1;
+        if (naBorda) {
+          cor = limbo;
+        } else if (Math.abs(dy) > R - 2 && Math.abs(dx) < R * 0.55) {
+          cor = gelo[tom];
         } else {
-          // a longitude aparente comprime perto da borda: dá sensação de esfera
           const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
           const n = fractal(lon * 3.4 + giro, y * 0.34, CFG.SEMENTE + 5150, 2);
           cor = n > 0.53 ? terra[tom] : oceano[tom];
@@ -533,15 +547,17 @@ function desenharSpriteTerra() {
         fx.fillRect(q * TERRA_D + x, y, 1, 1);
       }
     }
-    // brilho especular do oceano no alto-esquerda
-    fx.fillStyle = "#ffffff";
-    fx.fillRect(q * TERRA_D + c - Math.round(R * 0.5), c - Math.round(R * 0.5), 1, 1);
+    fx.fillStyle = "#ffffff";                   // brilho especular
+    fx.fillRect(q * TERRA_D + c - Math.round(R * 0.45), c - Math.round(R * 0.45), 1, 1);
   }
 }
 desenharSpriteTerra();
 
-/* ── sprite de Marte: mesma esfera, em ferrugem ──────────────
-   Vermelho poeirento com manchas escuras e uma calota branca só. */
+/* ── sprite de Marte: vermelho de verdade ────────────────────
+   Nada de ruído fino: Io era manchado de pontinhos e os dois ficavam
+   parecidos. Aqui as regiões escuras são FAIXAS largas de latitude, que é
+   como Marte se lê de longe — um vermelho forte cortado por mares escuros,
+   com a calota branca só no norte. */
 const MARTE_D = CFG.MARTE_RAIO * 2 + 1;
 const MARTE_QUADROS = 8;
 const marteSprite = document.createElement("canvas");
@@ -550,34 +566,41 @@ marteSprite.width = MARTE_D * MARTE_QUADROS; marteSprite.height = MARTE_D;
 function desenharSpriteMarte() {
   const fx = marteSprite.getContext("2d");
   const R = CFG.MARTE_RAIO, c = R;
-  const areia  = ["#d66b3c","#ee9160","#ffbb8e"];   // a poeira do corpo
-  const mancha = ["#9c4429","#b85c38","#d17d55"];   // regiões escuras
-  const gelo   = ["#e8dcd4","#f6efea","#ffffff"];   // a calota
-  const limbo  = "#8f3a22";
+  const vermelho = ["#c2231c","#e33a2b","#f4614a"];   // o corpo, saturado
+  const mar      = ["#8c1414","#a82018","#c23528"];   // as regiões escuras
+  const gelo     = ["#f0e4e0","#faf2ef","#ffffff"];
+  const limbo    = "#7a0f10";
 
   for (let q = 0; q < MARTE_QUADROS; q++) {
-    const giro = q * (12 / MARTE_QUADROS);
+    const giro = q * (Math.PI * 2 / MARTE_QUADROS);
     for (let y = 0; y < MARTE_D; y++) {
-      for (let x = 0; x < MARTE_D; x++) {
-        const dx = x - c, dy = y - c;
-        const dist = Math.hypot(dx, dy);
-        if (dist > R + 0.35) continue;
+      const dy = y - c;
+      const w = meiaLinha(R, dy);
+      if (w < 0) continue;
+      for (let x = c - w; x <= c + w; x++) {
+        const dx = x - c;
         const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
         const tom = luz > 0.68 ? 2 : luz > 0.36 ? 1 : 0;
         let cor;
-        if (dist > R - 0.75) {
+        const naBorda = (x === c - w || x === c + w) ||
+                        Math.abs(dy) === R || meiaLinha(R, dy + Math.sign(dy || 1)) < w - 1;
+        if (naBorda) {
           cor = limbo;
-        } else if (dy < -(R - 1.4) && Math.abs(dx) < R * 0.45) {
-          cor = gelo[tom];                          // só a calota norte
+        } else if (dy < -(R - 2) && Math.abs(dx) < R * 0.6) {
+          cor = gelo[tom];                      // calota norte, só uma
         } else {
           const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
-          const n = fractal(lon * 3.2 + giro, y * 0.36, CFG.SEMENTE + 3310, 2);
-          cor = n > 0.63 ? mancha[tom] : areia[tom];   // menos mancha: fica vermelho, nao marrom
+          // faixas largas: duas senoides de latitude moduladas pela longitude
+          const faixa = Math.sin(dy * 0.62 + Math.sin(lon + giro) * 0.9) +
+                        0.6 * Math.sin(dy * 0.29 - lon * 1.4 + giro);
+          cor = faixa > 0.55 ? mar[tom] : vermelho[tom];
         }
         fx.fillStyle = cor;
         fx.fillRect(q * MARTE_D + x, y, 1, 1);
       }
     }
+    fx.fillStyle = "#ff9d86";                   // brilho quente no alto-esquerda
+    fx.fillRect(q * MARTE_D + c - Math.round(R * 0.45), c - Math.round(R * 0.45), 1, 1);
   }
 }
 desenharSpriteMarte();
@@ -766,6 +789,7 @@ const rival = { x: 0, y: 0, vx: 0, vy: 0, ang: 0,
 let vencedor = null;
 let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, esperaTerra = 0, turbo = 0;
 let marte = null, esperaMarte = 0, ima = 0, flashIma = 0;
+let anuncio = null;
 let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, arco = 0, quadro = 0;
 let esperaColisao = 0, cadente = null, esperaCadente = 0;
 let cometa = null, esperaCometa = 0, flashEnjoo = 0;
@@ -873,6 +897,7 @@ function reiniciar() {
 
   terra = novaTerra(); esperaTerra = 0;
   marte = null; esperaMarte = CFG.MARTE_ESPERA; ima = 0; flashIma = 0;
+  anuncio = null;
   cam.x = buraco.x - visaoL() / 2;
   cam.y = buraco.y - visaoA() / 2;
 }
@@ -1147,7 +1172,8 @@ function adoecer(p) {
   // a pancada também freia na hora: senão o congelamento demora a ser sentido
   p.vx *= 0.4; p.vy *= 0.4;
   if (p !== buraco) return;
-  tremor = 18;
+  anunciar("SPEED DOWN", COR.enjoo);
+  tremor = 30;                                  // batida: sacode mais
   aberr = CFG.ABERRACAO;
   flashEnjoo = 26;
 }
@@ -1470,7 +1496,8 @@ function engolirTerra(dono) {
   dono.pulso = 1; dono.boca = 20;
   if (dono !== buraco) return;                  // o rival só engole, não turbina
   turbo = CFG.TERRA_TURBO;
-  tremor = 7;
+  anunciar("SPEED UP", COR.turbo);
+  tremor = 10;
   flashTerra = CFG.TERRA_CLARAO;
   for (let k = 0; k < 30; k++) raiarTurbo();
   soltarCoracoes(buraco.x, buraco.y, 8, 1.1, 0);
@@ -1486,7 +1513,8 @@ function engolirMarte(dono) {
   dono.pulso = 1; dono.boca = 20;
   if (dono !== buraco) return;                  // o rival só engole, como na Terra
   ima = CFG.MARTE_IMA;
-  tremor = 7;
+  anunciar("MAGNETIC!", COR.ima);
+  tremor = 10;
   flashIma = CFG.MARTE_CLARAO;
   aneis.push({ x: buraco.x, y: buraco.y, r: 3, vida: 24, total: 24, rival: false });
   for (let k = 0; k < 24; k++) faiscarIma();
@@ -1569,16 +1597,17 @@ function desenharMundo() {
     const x = Math.round(paraTelaX(terra.x)) - CFG.TERRA_RAIO;
     const y = Math.round(paraTelaY(terra.y)) - CFG.TERRA_RAIO;
     if (x > -TERRA_D && y > -TERRA_D && x < VL && y < VA) {
-      ctx.globalAlpha = 0.3;
-      disco(x + CFG.TERRA_RAIO, y + CFG.TERRA_RAIO, CFG.TERRA_RAIO + 3, "#bfe2f7");
+      // glow azul em camadas, respirando devagar
+      const cxT2 = x + CFG.TERRA_RAIO, cyT2 = y + CFG.TERRA_RAIO;
+      const pT = 0.5 + 0.5 * Math.sin(quadro * 0.055);
+      for (let k = 4; k >= 1; k--) {
+        ctx.globalAlpha = (0.1 + pT * 0.06) * k / 4;
+        disco(cxT2, cyT2, CFG.TERRA_RAIO + k * 2.1 + pT * 1.6, COR.glowTerra);
+      }
       ctx.globalAlpha = 1;
       const q = Math.floor(terra.quadro / 7) % TERRA_QUADROS;
       ctx.drawImage(terraSprite, q * TERRA_D, 0, TERRA_D, TERRA_D, x, y, TERRA_D, TERRA_D);
-      if (CFG.ROSTO) {                       // a Terra também tem carinha
-        const cxT = x + CFG.TERRA_RAIO, cyT = y + CFG.TERRA_RAIO - 1;
-        px(cxT - 2, cyT, COR.rosto); px(cxT + 2, cyT, COR.rosto);
-        px(cxT - 1, cyT + 2, COR.rosto); px(cxT, cyT + 3, COR.rosto); px(cxT + 1, cyT + 2, COR.rosto);
-      }
+      if (CFG.ROSTO) rostinho(x + CFG.TERRA_RAIO, y + CFG.TERRA_RAIO - 1);
     }
   }
 
@@ -1587,16 +1616,17 @@ function desenharMundo() {
     const x = Math.round(paraTelaX(marte.x)) - CFG.MARTE_RAIO;
     const y = Math.round(paraTelaY(marte.y)) - CFG.MARTE_RAIO;
     if (x > -MARTE_D && y > -MARTE_D && x < VL && y < VA) {
-      ctx.globalAlpha = 0.3;
-      disco(x + CFG.MARTE_RAIO, y + CFG.MARTE_RAIO, CFG.MARTE_RAIO + 3, COR.imaClarao);
+      // glow vermelho, mais forte que o da Terra: Marte é o planeta quente
+      const cxM2 = x + CFG.MARTE_RAIO, cyM2 = y + CFG.MARTE_RAIO;
+      const pM = 0.5 + 0.5 * Math.sin(quadro * 0.075 + 1.3);
+      for (let k = 5; k >= 1; k--) {
+        ctx.globalAlpha = (0.13 + pM * 0.09) * k / 5;
+        disco(cxM2, cyM2, CFG.MARTE_RAIO + k * 2.2 + pM * 2, COR.glowMarte);
+      }
       ctx.globalAlpha = 1;
       const q = Math.floor(marte.quadro / 7) % MARTE_QUADROS;
       ctx.drawImage(marteSprite, q * MARTE_D, 0, MARTE_D, MARTE_D, x, y, MARTE_D, MARTE_D);
-      if (CFG.ROSTO) {                       // Marte também tem carinha
-        const cxM = x + CFG.MARTE_RAIO, cyM = y + CFG.MARTE_RAIO - 1;
-        px(cxM - 2, cyM, COR.rosto); px(cxM + 2, cyM, COR.rosto);
-        px(cxM - 1, cyM + 2, COR.rosto); px(cxM, cyM + 3, COR.rosto); px(cxM + 1, cyM + 2, COR.rosto);
-      }
+      if (CFG.ROSTO) rostinho(x + CFG.MARTE_RAIO, y + CFG.MARTE_RAIO - 1);
     }
   }
 
@@ -1665,6 +1695,19 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   disco(bx, by, r + 5, halo);
   ctx.globalAlpha = 1;
 
+  // enjoado, o anel de acreção fica verde e o personagem solta glows radiais
+  if (p.enjoo > 0) {
+    paleta = COR.discoV;
+    const q = Math.min(1, p.enjoo / 40);
+    // três ondas escalonadas: uma sai, a seguinte já está no meio do caminho
+    for (let i = 0; i < 3; i++) {
+      const t = ((quadro * 0.017 + i / 3) % 1);
+      ctx.globalAlpha = 0.3 * (1 - t) * q;
+      anel(bx, by, r + 2 + t * (r * 0.9 + 12), 2 + t * 2, COR.enjoo);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // anel de acreção: duas voltas, fortes de um lado e apagadas do outro
   const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04);
   const N = paleta.length;
@@ -1685,22 +1728,18 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   disco(bx, by, r, contorno);
   disco(bx, by, r - 1, COR.corpo);
 
-  // enjoado: o corpo esverdeia e sobem bolhinhas de mal-estar por cima
+  // enjoado: o corpo continua branco — quem fica verde é o anel, lá em cima —
+  // e sobem bolhinhas de mal-estar
   if (p.enjoo > 0) {
     const q = Math.min(1, p.enjoo / 40);         // passa aos poucos no fim
-    ctx.globalAlpha = 0.75 * q;
-    anel(bx, by, r, 1.8, COR.enjoo);
-    ctx.globalAlpha = 0.34 * q;
-    disco(bx, by, r - 1, COR.cometa[1]);
     ctx.globalAlpha = 0.85 * q;
-    // as bolhinhas sobem sempre: é o que dá a leitura de náusea, e não de frio
     for (let i = 0; i < 5; i++) {
       const t = ((quadro * 0.028 + i * 0.2) % 1);
       const bxx = bx + Math.sin(quadro * 0.09 + i * 2.1) * r * 0.55;
       const byy = by - r * 0.5 - t * (r * 0.9 + 6);
       ctx.globalAlpha = 0.85 * q * (1 - t);
-      px(bxx, byy, COR.cometa[i % 2 ? 2 : 3]);
-      if (t < 0.5) { px(bxx + 1, byy, COR.cometa[3]); px(bxx, byy + 1, COR.cometa[3]); }
+      px(bxx, byy, COR.cometa[i % 2 ? 3 : 4]);
+      if (t < 0.5) { px(bxx + 1, byy, COR.cometa[4]); px(bxx, byy + 1, COR.cometa[4]); }
     }
     ctx.globalAlpha = 1;
   }
@@ -1777,12 +1816,16 @@ function desenharCometa() {
   ctx.globalAlpha = 1;
 
   const x = paraTelaX(cometa.x), y = paraTelaY(cometa.y);
-  ctx.globalAlpha = 0.3;                        // coma: o halo gelado da cabeça
-  disco(x, y, R + 3, COR.cometa[1]);
-  ctx.globalAlpha = 0.55;
-  disco(x, y, R, COR.cometa[1]);
+  // a coma pulsa: cresce e encolhe, e o brilho vai junto
+  const pc = 0.5 + 0.5 * Math.sin(quadro * 0.19);
+  for (let k = 4; k >= 1; k--) {
+    ctx.globalAlpha = (0.1 + pc * 0.1) * k / 4;
+    disco(x, y, R * 0.7 + k * 2.3 + pc * 2.4, COR.cometa[3]);
+  }
+  ctx.globalAlpha = 0.5 + pc * 0.2;
+  disco(x, y, R * (0.92 + pc * 0.12), COR.cometa[1]);
   ctx.globalAlpha = 1;
-  disco(x, y, R * 0.62, COR.cometa[0]);
+  disco(x, y, R * (0.6 + pc * 0.06), COR.cometa[0]);
   disco(x, y, R * 0.4, COR.cometa[2]);
   // núcleo em cruz: um disco de raio 2 sai quadrado e estraga a cabeça
   px(x, y, COR.cometa[4]);
@@ -1803,6 +1846,19 @@ function desenharBuraco() {
                      COR.disco, COR.halo, COR.contorno, COR.blush, true);
 }
 
+/* a carinha dos planetas: dois olhos e um sorriso, com um fio branco atrás
+   para não sumir no oceano nem na poeira vermelha */
+function rostinho(cx, cy) {
+  const c = COR.rosto, B = "#ffffff";
+  const traco = [[-3,0],[-3,1],[3,0],[3,1],[-2,3],[-1,4],[0,4],[1,4],[2,3]];
+  // um fio branco de 1 px em volta do traço, e só. Um bloco branco atrás
+  // some com o planeta e vira máscara em vez de carinha
+  for (const [ox, oy] of traco)
+    for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]])
+      px(cx + ox + dx, cy + oy + dy, B);
+  for (const [ox, oy] of traco) px(cx + ox, cy + oy, c);
+}
+
 /* a carinha: olhos que espiam para onde ele está indo, bochechas e um sorriso */
 function desenharRosto(p, bx, by, r, blush) {
   const v = Math.hypot(p.vx, p.vy);
@@ -1821,14 +1877,12 @@ function desenharRosto(p, bx, by, r, blush) {
     olho = OLHOS[Math.min(OLHOS.length - 1, t + 1)];   // olhos de um tamanho acima
     boca = BOCAS_O[t];
   } else if (doente) {
-    olho = OLHOS_ENJOO[t];
+    olho = OLHOS[t];
     boca = BOCAS_TRISTE[t];
   } else {
     olho = OLHOS[t];
     boca = p.boca > 0 ? BOCAS_O[t] : BOCAS[t];
   }
-  const tinta = doente ? COR.enjooRosto : COR.rosto;
-
   // enquanto passa mal a bochecha sai de cena: é o que faz o rostinho perder
   // o viço, mais do que a boca virada
   if (t >= 1 && !doente) {
@@ -1838,9 +1892,9 @@ function desenharRosto(p, bx, by, r, blush) {
     carimbo(BOCHECHAS[t], bx + dist + ox, by + r * 0.26 + oy, blush);
     ctx.globalAlpha = 1;
   }
-  carimbo(olho, bx - sep + ox, by - r * 0.13 + oy, tinta);
-  carimbo(olho, bx + sep + ox, by - r * 0.13 + oy, tinta);
-  carimbo(boca, bx + ox, by + r * 0.34 + oy, tinta);
+  carimbo(olho, bx - sep + ox, by - r * 0.13 + oy, COR.rosto);
+  carimbo(olho, bx + sep + ox, by - r * 0.13 + oy, COR.rosto);
+  carimbo(boca, bx + ox, by + r * 0.34 + oy, COR.rosto);
 }
 
 /* Estouro arco-íris: sete faixas concêntricas abrindo a partir do
@@ -2014,6 +2068,36 @@ function desenharMarcaCometa() {
   marcaNaBorda(x, y, [COR.cometa[2], COR.cometa[4], COR.cometa[0]], 2);
 }
 
+/* Aviso do efeito no meio da tela. Entra estufando, sobe devagar e some.
+   O brilho é o próprio texto repetido em volta com alfa baixo — o contorno
+   branco do texto() sozinho não separa a letra de um fundo colorido. */
+function anunciar(txt, cor) {
+  anuncio = { txt: txt, cor: cor, vida: CFG.ANUNCIO, total: CFG.ANUNCIO };
+}
+
+function desenharAnuncio() {
+  if (!anuncio) return;
+  if (--anuncio.vida <= 0) { anuncio = null; return; }
+  const p = 1 - anuncio.vida / anuncio.total;        // 0 no começo, 1 no fim
+  // estufa nos primeiros quadros e depois assenta
+  const tam = p < 0.14 ? 1 : 2;
+  const l = larguraTexto(anuncio.txt, tam);
+  const x = Math.round((VL - l) / 2);
+  const y = Math.round(VA * 0.30 - p * 14);          // sobe enquanto some
+  const a = p > 0.7 ? (1 - p) / 0.3 : 1;             // só apaga no fim
+
+  ctx.globalAlpha = a * (0.16 + 0.12 * Math.sin(quadro * 0.3));
+  for (let d = 2; d <= 4; d++) {                     // halo em volta da palavra
+    desenhaGlifos(anuncio.txt, x - d, y, anuncio.cor, tam);
+    desenhaGlifos(anuncio.txt, x + d, y, anuncio.cor, tam);
+    desenhaGlifos(anuncio.txt, x, y - d, anuncio.cor, tam);
+    desenhaGlifos(anuncio.txt, x, y + d, anuncio.cor, tam);
+  }
+  ctx.globalAlpha = a;
+  texto(anuncio.txt, x, y, anuncio.cor, tam);
+  ctx.globalAlpha = 1;
+}
+
 function desenharHUD() {
   desenharMarcaRival();
   desenharMarcaCadente();
@@ -2033,6 +2117,7 @@ function desenharHUD() {
     barra(VL - 5 - LARG, 29, LARG, rival.progresso / custoDoNivel(rival.nivel), COR.discoR[5]);
 
   if (flash > 0) textoCentro("CRESCEU!", Math.round(VA * 0.3), COR.coracao[1], 2);
+  desenharAnuncio();
 
   const b = botaoSair();
   caixa(b, COR.painel, COR.hudFraco);
