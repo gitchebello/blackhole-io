@@ -1483,17 +1483,33 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   disco(bx, by, r + 5, halo);
   ctx.globalAlpha = 1;
 
-  // anel de acreção: duas voltas, fortes de um lado e apagadas do outro
+  // Anel de acreção: forte de um lado e apagado do outro, como antes. O que
+  // mudou é a ESPESSURA, que agora varia ao longo da volta em vez de ser fixa
+  // em duas camadas — é o volume irregular que dá a sensação de fluido.
+  //
+  // As ondas usam harmônicos INTEIROS do ângulo (3, 5 e 7). Isso é o que faz
+  // o desenho fechar a volta sem emenda: qualquer valor quebrado deixaria um
+  // degrau visível onde a=0 encontra a=2π. E cada uma anda num ritmo próprio,
+  // então o relevo nunca se repete igual — parece matéria escorrendo, não um
+  // anel entalhado girando.
   const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04);
+  const corre = comTurbo && turbo > 0 ? 2.2 : 1;      // no turbo o fluido agita
+  const f = p === buraco ? 0 : 2.3;                   // os dois fora de sincronia
   const N = paleta.length;
-  for (let k = 0; k < 2; k++) {
-    const rr = r + 1 + k;
-    const passos = Math.max(20, Math.ceil(rr * 7));
-    for (let i = 0; i < passos; i++) {
-      const a = (i / passos) * Math.PI * 2;
-      const lado = 0.5 + 0.5 * Math.sin(a - giro);
-      const inten = (0.34 + 0.66 * lado) * (1 - k * 0.3);
+  const passos = Math.max(20, Math.ceil((r + 4) * 7));
+  for (let i = 0; i < passos; i++) {
+    const a = (i / passos) * Math.PI * 2;
+    const lado = 0.5 + 0.5 * Math.sin(a - giro);
+    const onda = 0.45 * Math.sin(3 * a + quadro * 0.021 * corre + f) +
+                 0.30 * Math.sin(5 * a - quadro * 0.014 * corre + f * 2 + 1.7) +
+                 0.25 * Math.sin(7 * a + quadro * 0.009 * corre + f * 3 + 4.1);
+    // o lado brilhante também é o mais encorpado: material se acumulando
+    const nk = Math.max(1, Math.round(1 + (0.5 + 0.5 * onda) * (1.3 + lado * 1.9)));
+    for (let k = 0; k < nk; k++) {
+      const queda = nk > 1 ? k / (nk - 1) : 0;        // 0 por dentro, 1 na ponta
+      const inten = (0.34 + 0.66 * lado) * (1 - queda * 0.42);
       if (inten < 0.3) continue;
+      const rr = r + 1 + k;
       px(bx + Math.cos(a) * rr, by + Math.sin(a) * rr,
          paleta[Math.min(N - 1, Math.floor(inten * N))]);
     }
