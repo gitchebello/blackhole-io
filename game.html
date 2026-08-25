@@ -1045,6 +1045,24 @@ function brilho(cx, cy, r0, r1, cor, forca, curva) {
   ctx.globalAlpha = 1;
 }
 
+/* Reta em pixel cheio (Bresenham). O gráfico do fim é a única coisa do jogo
+   que precisa ligar dois pontos quaisquer. */
+function linha(x0, y0, x1, y1, cor) {
+  ctx.fillStyle = cor;
+  let x = Math.round(x0), y = Math.round(y0);
+  const xf = Math.round(x1), yf = Math.round(y1);
+  const dx = Math.abs(xf - x), dy = -Math.abs(yf - y);
+  const sx = x < xf ? 1 : -1, sy = y < yf ? 1 : -1;
+  let erro = dx + dy;
+  for (let guarda = 0; guarda < 4096; guarda++) {
+    ctx.fillRect(x, y, 1, 1);
+    if (x === xf && y === yf) break;
+    const e2 = 2 * erro;
+    if (e2 >= dy) { erro += dy; x += sx; }
+    if (e2 <= dx) { erro += dx; y += sy; }
+  }
+}
+
 function anel(cx, cy, raio, esp, cor) {        // rosca preenchida, sem antialias
   ctx.fillStyle = cor;
   const x0 = Math.round(cx), y0 = Math.round(cy);
@@ -1157,6 +1175,8 @@ let esperaColisao = 0, cadente = null, esperaCadente = 0;
 let cometa = null, esperaCometa = 0, flashEnjoo = 0;
 let zoom = 1, zoomAlvo = 1, raioTela = CFG.RAIO_BASE;
 let expansao = 0;       // 1 no instante do nível novo, decai até 0
+let historico = [];     // { t: segundos, v: [estrelas de cada um] }
+let quadroInicio = 0;   // `quadro` nunca zera; o tempo da partida sai da diferença
 const cam = { x: 0, y: 0 };
 
 /* quanto custa sair do nível n: cada nível pede mais que o anterior */
@@ -1287,6 +1307,7 @@ function reiniciar() {
   buraco.pulso = 0; buraco.boca = 0; buraco.atordoado = 0; aneis = [];
   faiscas = []; coracoes = []; tremor = 0; flash = 0; flashLado = 0; aberr = 0;
   arco = 0; turbo = 0; esperaColisao = 0; expansao = 0;
+  historico = []; quadroInicio = quadro;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
   buraco.enjoo = 0; buraco.surpresa = 0;
@@ -1764,7 +1785,20 @@ function bafo(x, y, quantas, forca) {
   }
 }
 
+/* Uma amostra a cada meio segundo. Meio segundo é o suficiente para o
+   traçado ficar liso na largura que ele tem na tela, e uma partida de três
+   minutos guarda só 360 amostras. */
+const PASSO_HISTORICO = 30;
+function anotarDesempenho() {
+  if (historico.length && quadro - historico[historico.length - 1].q < PASSO_HISTORICO)
+    return;
+  historico.push({ q: quadro, t: (quadro - quadroInicio) / 60,
+                   v: todos().map(p => p.comidas) });
+}
+
 function terminar(quem) {
+  historico.push({ q: quadro, t: (quadro - quadroInicio) / 60,
+                   v: todos().map(p => p.comidas) });
   vencedor = quem;
   cena = "fim";
   tremor = 14;
@@ -2043,6 +2077,7 @@ function passo() {
   passoRoubadas();
   if (espiral > 0.02) puxarPlanetas();
   passoParticulas();
+  anotarDesempenho();
 
   /* — câmera — */
   const alvoX = limitar(buraco.x - visaoL() / 2, L.x0, L.x1 - visaoL());
@@ -3264,29 +3299,83 @@ function desenharHUD() {
 }
 
 /* tela de fim: quem chegou ao nível 12 e quantas estrelas cada um juntou */
+/* Gráfico de estrelas por tempo, uma linha por jogador na cor dele.
+   O eixo Y vai fixo até a meta: assim a altura de cada traço já diz o quanto
+   faltava, e a linha de quem venceu encosta no topo. Escala automática faria
+   uma partida apertada parecer igual a uma goleada. */
+function desenharGrafico(x0, y0, l, a) {
+  if (historico.length < 2) return;
+  const tmax = Math.max(1, historico[historico.length - 1].t);
+  const emX = t => x0 + (t / tmax) * l;
+  const emY = v => y0 + a - (Math.min(v, CFG.META) / CFG.META) * a;
+
+  // um cartão claro atrás: a tela de fim deixa o jogo aparecer por baixo, e
+  // corações subindo no meio do gráfico atrapalhavam a leitura das linhas
+  ctx.globalAlpha = 0.62;
+  ctx.fillStyle = COR.painel;
+  ctx.fillRect(x0 - 4, y0 - 8, l + 10, a + 22);
+  ctx.globalAlpha = 1;
+
+  // moldura: só as duas réguas, sem caixa fechada
+  ctx.fillStyle = COR.borda;
+  ctx.fillRect(x0, y0, 1, a + 1);
+  ctx.fillRect(x0, y0 + a, l + 1, 1);
+
+  // a meta, pontilhada no alto
+  ctx.fillStyle = COR.hudFraco;
+  for (let x = x0; x <= x0 + l; x += 3) ctx.fillRect(x, y0, 1, 1);
+
+  // do último para o primeiro, para a sua linha ficar por cima
+  const quantos = historico[0].v.length;
+  for (let i = quantos - 1; i >= 0; i--) {
+    const eu = i === 0;
+    const cor = eu ? COR.hud : paletaDe(rivais[i - 1]).disco[6];
+    let ax = emX(historico[0].t), ay = emY(historico[0].v[i]);
+    for (let k = 1; k < historico.length; k++) {
+      const bx = emX(historico[k].t), by = emY(historico[k].v[i]);
+      linha(ax, ay, bx, by, cor);
+      if (eu) linha(ax, ay + 1, bx, by + 1, cor);   // a sua sai mais grossa
+      ax = bx; ay = by;
+    }
+    // um ponto na ponta, para achar o fim de cada traço
+    disco(ax, ay, 1.4, cor);
+  }
+
+  // legendas: a meta em cima da régua e a duração no fim do eixo do tempo
+  texto("" + CFG.META, x0 + 3, y0 - 1, COR.hudFraco, 1);
+  const dur = Math.floor(tmax / 60) + ":" + ("0" + Math.round(tmax % 60)).slice(-2);
+  texto(dur, x0 + l - larguraTexto(dur, 1), y0 + a + 3, COR.hudFraco, 1);
+}
+
 function desenharFim() {
   ctx.globalAlpha = 0.72;
   ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
 
   const ganhou = vencedor === buraco;
-  const topo = Math.round(VA * 0.24);
+  // sobe o bloco todo: com o gráfico embaixo, o layout antigo estourava a tela
+  const topo = Math.round(VA * 0.10);
   const palV = ganhou ? null : paletaDe(vencedor);
   textoCentro(ganhou ? "voce venceu!" : "o rival venceu!", topo,
               ganhou ? COR.hud : palV.disco[6], 2);
-  textoCentro("chegou a " + CFG.META + " estrelas", topo + 22, COR.hudFraco, 1);
+  textoCentro("chegou a " + CFG.META + " estrelas", topo + 20, COR.hudFraco, 1);
 
   // placar de todo mundo, do maior para o menor
   const ordem = todos().slice().sort((a, b) => b.comidas - a.comidas);
-  let y0 = topo + 46;
+  let y0 = topo + 38;
   for (const p of ordem) {
     const eu = p === buraco;
     const cor = eu ? COR.hud : paletaDe(p).disco[6];
-    texto(eu ? "voce" : "rival " + (p.indice + 1), 24, y0, cor, 1);
-    const e1 = p.comidas + " estrelas";
-    texto(e1, VL - 24 - larguraTexto(e1, 1), y0, cor, 1);
-    y0 += 14;
+    texto(eu ? "voce" : "rival " + (p.indice + 1), 18, y0, cor, 1);
+    const e1 = "" + p.comidas;
+    texto(e1, VL - 18 - larguraTexto(e1, 1), y0, cor, 1);
+    y0 += 12;
   }
+
+  /* desempenho ao longo da partida */
+  const gx = 18, gl = VL - 36;
+  const gy = y0 + 12, ga = Math.max(40, botaoJogar().y - gy - 14);
+  desenharGrafico(gx, gy, gl, ga);
 
   const b = botaoJogar();
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
