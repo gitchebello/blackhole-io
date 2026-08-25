@@ -1266,6 +1266,125 @@ function reiniciar() {
 }
 reiniciar();
 
+/* ── som ─────────────────────────────────────────────────────
+   Tudo sintetizado na hora com Web Audio: o jogo é um arquivo só e continua
+   sendo, sem nenhum .wav pendurado. São dois tijolos — um oscilador com
+   envelope e um chiado filtrado — e todos os efeitos saem da combinação
+   dos dois.
+
+   O contexto só nasce no primeiro toque: navegador de celular recusa áudio
+   iniciado sem gesto do usuário, e criar antes deixaria um contexto suspenso
+   para sempre. */
+const SOM = { ctx: null, mestre: null, ligado: true, ultimo: {} };
+
+function iniciarSom() {
+  if (SOM.ctx) { if (SOM.ctx.state === "suspended") SOM.ctx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  SOM.ctx = new AC();
+  SOM.mestre = SOM.ctx.createGain();
+  SOM.mestre.gain.value = 0.34;          // o jogo é para ouvir baixo
+  SOM.mestre.connect(SOM.ctx.destination);
+}
+
+/* Trava por efeito: engolir dez estrelas no mesmo quadro tocaria dez vezes o
+   mesmo blip e viraria estalo. `espera` é em milissegundos. */
+function podeTocar(nome, espera) {
+  const t = SOM.ctx ? SOM.ctx.currentTime * 1000 : 0;
+  if (SOM.ultimo[nome] && t - SOM.ultimo[nome] < espera) return false;
+  SOM.ultimo[nome] = t;
+  return true;
+}
+
+/* Um oscilador com envelope. `f2` faz a nota escorregar até outra frequência,
+   que é o que dá o "pew" de subida e o "wah" de queda. */
+function tom(f1, f2, dur, tipo, vol, atraso) {
+  if (!SOM.ctx || !SOM.ligado) return;
+  const t = SOM.ctx.currentTime + (atraso || 0);
+  const o = SOM.ctx.createOscillator();
+  const g = SOM.ctx.createGain();
+  o.type = tipo || "square";
+  o.frequency.setValueAtTime(f1, t);
+  if (f2 && f2 !== f1) o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), t + dur);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.012, dur * 0.3));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(SOM.mestre);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+
+/* Chiado filtrado: a base de tudo que é batida, estalo ou explosão. */
+function chiado(dur, vol, corte, atraso) {
+  if (!SOM.ctx || !SOM.ligado) return;
+  const t = SOM.ctx.currentTime + (atraso || 0);
+  const n = Math.max(1, Math.floor(SOM.ctx.sampleRate * dur));
+  const buf = SOM.ctx.createBuffer(1, n, SOM.ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const src = SOM.ctx.createBufferSource();
+  src.buffer = buf;
+  const f = SOM.ctx.createBiquadFilter();
+  f.type = "lowpass"; f.frequency.value = corte || 1800;
+  const g = SOM.ctx.createGain();
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f); f.connect(g); g.connect(SOM.mestre);
+  src.start(t); src.stop(t + dur + 0.02);
+}
+
+/* O repertório. Cada efeito é uma frase curta: o jogo é rápido e som
+   comprido atropela o próximo. */
+const SFX = {
+  comer(altura) {                        // sobe de tom conforme a sequência
+    if (!podeTocar("comer", 45)) return;
+    const base = 620 + Math.min(1, altura || 0) * 520;
+    tom(base, base * 1.5, 0.07, "square", 0.14);
+  },
+  nivel() {
+    [0, 0.07, 0.14, 0.23].forEach((d, i) =>
+      tom(440 * Math.pow(1.26, i), 440 * Math.pow(1.26, i + 1), 0.13, "triangle", 0.2, d));
+  },
+  planeta(f) {                           // um sino por planeta, cada um numa nota
+    tom(f, f * 2, 0.16, "triangle", 0.22);
+    tom(f * 2.01, f * 3, 0.2, "sine", 0.14, 0.04);
+  },
+  cadente() {
+    [0, 0.05, 0.1].forEach((d, i) => tom(900 + i * 320, 1500 + i * 400, 0.1, "square", 0.16, d));
+  },
+  trombada() {
+    chiado(0.3, 0.5, 900);
+    tom(180, 60, 0.28, "sawtooth", 0.3);
+  },
+  gelo() {
+    chiado(0.12, 0.34, 5200);
+    tom(1500, 700, 0.09, "square", 0.12);
+  },
+  cometa() {                             // queda longa: o "passar mal"
+    tom(520, 120, 0.55, "sawtooth", 0.24);
+    chiado(0.4, 0.22, 700, 0.05);
+  },
+  dreno() {
+    if (!podeTocar("dreno", 90)) return;
+    tom(300, 820, 0.14, "sine", 0.13);
+  },
+  escudo() {
+    [0, 0.06, 0.12, 0.18, 0.24].forEach((d, i) =>
+      tom(520 * Math.pow(1.2, i), 520 * Math.pow(1.2, i) * 1.6, 0.2, "sine", 0.16, d));
+  },
+  coroa() {
+    [0, 0.08, 0.16].forEach((d, i) =>
+      tom(660 * Math.pow(1.33, i), 660 * Math.pow(1.33, i), 0.16, "triangle", 0.2, d));
+  },
+  perda() {
+    tom(420, 150, 0.26, "square", 0.2);
+  },
+  clique() { tom(720, 900, 0.05, "square", 0.16); },
+  fim(ganhou) {
+    const notas = ganhou ? [523, 659, 784, 1047] : [523, 466, 392, 311];
+    notas.forEach((f, i) => tom(f, f, 0.22, "triangle", 0.22, i * 0.13));
+  }
+};
+
 /* ── controle ────────────────────────────────────────────────── */
 const toque = { ativo: false, ax: 0, ay: 0, x: 0, y: 0, id: null,
                 ang: null, volta: 0, sentido: 0, acum: 0, parado: 0, girando: false };
@@ -1284,25 +1403,32 @@ function sair()  { toque.ativo = false; toque.id = null;
 
 tela.addEventListener("pointerdown", e => {
   e.preventDefault();
+  iniciarSom();                          // navegador só libera áudio com gesto
   const gx = e.clientX / escala, gy = e.clientY / escala;
 
   if (cena === "menu") {
     for (let i = 0; i < CFG.RIVAIS_MAX; i++)
       if (dentro(gx, gy, botaoOponente(i), 5)) {
+        SFX.clique();
         CFG.RIVAIS = i + 1;
         gerarCamadas();                // entra a cor de nebulosa do novo jogador
         reiniciar();                   // e recoloca os bonecos já no menu
         return;
       }
-    if (dentro(gx, gy, botaoJogar(), 6)) jogar();
+    if (dentro(gx, gy, botaoSom(), 5)) {
+      SOM.ligado = !SOM.ligado;
+      if (SOM.ligado) SFX.clique();
+      return;
+    }
+    if (dentro(gx, gy, botaoJogar(), 6)) { SFX.clique(); jogar(); }
     return;
   }
   if (cena === "fim") {
-    if (dentro(gx, gy, botaoJogar(), 6)) jogar();
-    else if (dentro(gx, gy, botaoSair(), 8)) sair();
+    if (dentro(gx, gy, botaoJogar(), 6)) { SFX.clique(); jogar(); }
+    else if (dentro(gx, gy, botaoSair(), 8)) { SFX.clique(); sair(); }
     return;
   }
-  if (dentro(gx, gy, botaoSair(), 8)) { sair(); return; }
+  if (dentro(gx, gy, botaoSair(), 8)) { SFX.clique(); sair(); return; }
 
   if (toque.id !== null) return;
   tela.setPointerCapture(e.pointerId);
@@ -1331,6 +1457,7 @@ for (const ev of ["pointerup", "pointercancel"])
   });
 
 window.addEventListener("keydown", e => {
+  iniciarSom();
   teclas[e.key] = true;
   if ((cena === "menu" || cena === "fim") && (e.key === "Enter" || e.key === " ")) jogar();
   else if (e.key === "Escape") sair();
@@ -1558,6 +1685,7 @@ function trombada(a, b, ux, uy) {
 
   const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
   const meu = a === buraco || b === buraco;
+  if (meu) SFX.trombada();
   // só sacode a tela na trombada que envolve você; entre rivais, um estalo
   if (meu) {
     tremor = CFG.COLISAO_TREMOR;
@@ -1638,7 +1766,7 @@ function passoCadente(L) {
       }
       p.pulso = 1; p.boca = 22;
       if (p === buraco) { tremor = 16; aberr = CFG.ABERRACAO; soltarCoracoes(p.x, p.y, 18, 1.8, 1); }
-      if (p === buraco) anunciar("+" + CFG.CADENTE_PREMIO + "!", COR.cadente[2]);
+      if (p === buraco) { anunciar("+" + CFG.CADENTE_PREMIO + "!", COR.cadente[2]); SFX.cadente(); }
       ganharEstrelas(p, CFG.CADENTE_PREMIO);
       cadente = null;
       return;
@@ -1719,6 +1847,7 @@ function escudou(p, x, y) {
 }
 
 function adoecer(p) {
+  if (p === buraco) SFX.cometa();
   p.enjoo = CFG.COMETA_ENJOO;
   // o cometa não só atrasa: derruba estrelas na batida
   const cai = Math.min(CFG.COMETA_ESTRELAS, p.comidas);
@@ -1768,6 +1897,7 @@ function verLideranca() {
   primeiro = melhor;
   if (!primeiro || cena !== "jogo") return;
   coroaAnim = 1;
+  if (primeiro === buraco) SFX.coroa();
   explodirEstrelas(primeiro.x, primeiro.y, 38);
   if (primeiro === buraco) { tremor = Math.max(tremor, 8); flashLado = 24; }
 }
@@ -1792,6 +1922,7 @@ function anotarDesempenho() {
 }
 
 function terminar(quem) {
+  SFX.fim(quem === buraco);
   historico.push({ q: quadro, t: (quadro - quadroInicio) / 60,
                    v: todos().map(p => p.comidas) });
   vencedor = quem;
@@ -2204,6 +2335,7 @@ function subiuDeNivel(dono) {
     tremor = 22; flash = CFG.ARCO; flashLado = 36;
     aberr = CFG.ABERRACAO; arco = CFG.ARCO;
     expansao = 1;                                     // a câmera abre e assenta
+    SFX.nivel();
     soltarCoracoes(buraco.x, buraco.y, 34, 2.1, 1);   // chuva de corações
   } else {
     soltarCoracoes(dono.x, dono.y, 8, 1.2, 0);
@@ -2228,8 +2360,10 @@ function passoPerdas() {
   for (const k in perdaEspera) {
     if (perdaEspera[k] <= 0) continue;
     if (--perdaEspera[k] > 0) continue;
-    if (perdaAcum[k] > 0)
+    if (perdaAcum[k] > 0) {
       anunciar("-" + perdaAcum[k], k === "dreno" ? COR.roxo : COR.bloco[3]);
+      SFX.perda();
+    }
     perdaAcum[k] = 0;
   }
 }
@@ -2272,6 +2406,7 @@ function engolirEstrela(indice, dono) {
   dono.pulso = 1; dono.boca = 18;
   // marca o quanto ele está comendo agora: o disco de acreção lê disso
   dono.fervor = Math.min(1.6, (dono.fervor || 0) + 0.45);
+  if (dono === buraco) SFX.comer(dono.fervor / 1.6);
   aneis.push({ x: e.x, y: e.y, r: 2, vida: 15, total: 15, rival: dono !== buraco,
                pal: dono !== buraco ? paletaDe(dono).disco : null });
   if (dono === buraco && Math.random() < 0.28) soltarCoracoes(e.x, e.y, 1, 0.7, 0);
@@ -2279,6 +2414,7 @@ function engolirEstrela(indice, dono) {
 }
 
 function engolirTerra(dono) {
+  if (dono === buraco) SFX.planeta(523);
   faiscar(terra.x, terra.y, 18, 2, 8);
   terra = null;
   esperaTerra = CFG.TERRA_ESPERA;
@@ -2296,6 +2432,7 @@ function engolirTerra(dono) {
 
 
 function engolirMarte(dono) {
+  if (dono === buraco) SFX.planeta(392);
   faiscar(marte.x, marte.y, 18, 2, 8);
   marte = null;
   esperaMarte = CFG.MARTE_ESPERA;
@@ -2311,6 +2448,7 @@ function engolirMarte(dono) {
 }
 
 function engolirSaturno(dono) {
+  if (dono === buraco) SFX.planeta(659);
   faiscar(saturno.x, saturno.y, 18, 2, 8);
   saturno = null;
   esperaSaturno = CFG.SATURNO_ESPERA;
@@ -2367,6 +2505,7 @@ function passoBlocos(L) {
 
     const rv = vitima === buraco ? raioMundo() : raioMundoNivel(vitima.nivel);
     if (Math.hypot(g.x - vitima.x, g.y - vitima.y) < rv + rr) {
+      if (vitima === buraco) SFX.gelo();
       if (escudou(vitima, g.x, g.y)) { blocos.splice(i, 1); continue; }
       const quantas = Math.min(CFG.SATURNO_DANO, vitima.comidas);
       if (quantas > 0) perderEstrelas(vitima, quantas, "gelo");
@@ -2448,7 +2587,7 @@ function passoRoubadas() {
       ganharEstrelas(p, 1);
       // o total é contado na CHEGADA, não no arranque: as últimas estrelas
       // ainda estão voando quando o poder acaba, e elas contam
-      if (p === buraco) { ganhoDreno++; ganhoEspera = CFG.PERDA_ESPERA; }
+      if (p === buraco) { ganhoDreno++; ganhoEspera = CFG.PERDA_ESPERA; SFX.dreno(); }
       p.pulso = 1; p.boca = 16;
       aneis.push({ x: p.x, y: p.y, r: 2, vida: 14, total: 14, rival: p !== buraco, pal: p !== buraco ? paletaDe(p).disco : null });
       faiscar(p.x, p.y, 8, 3, 8);
@@ -2467,6 +2606,7 @@ function passoRoubadas() {
 }
 
 function engolirNetuno(dono) {
+  if (dono === buraco) SFX.planeta(440);
   faiscar(netuno.x, netuno.y, 18, 2, 8);
   netuno = null;
   esperaNetuno = CFG.NETUNO_ESPERA;
@@ -2475,6 +2615,7 @@ function engolirNetuno(dono) {
   dono.imune = CFG.NETUNO_IMUNE;
   if (dono !== buraco) { tremor = 6; return; }
   anunciar("INVINCIBLE!", COR.netunoTexto, true);
+  SFX.escudo();
   tremor = 12;
   flashAzul = CFG.NETUNO_CLARAO;
   arco = Math.max(arco, 30);
@@ -2487,6 +2628,7 @@ function engolirNetuno(dono) {
 }
 
 function engolirJupiter(dono) {
+  if (dono === buraco) SFX.planeta(330);
   faiscar(jupiter.x, jupiter.y, 18, 2, 8);
   jupiter = null;
   esperaJupiter = CFG.JUPITER_ESPERA;
@@ -3629,6 +3771,13 @@ function botaoOponente(i) {
   return { x: x0 + i * (l + esp), y: b.y + b.a + 16, l: l, a: 18 };
 }
 
+/* liga/desliga o som, abaixo da linha de oponentes */
+function botaoSom() {
+  const l = 62, a = 16;
+  const b0 = botaoOponente(0);
+  return { x: Math.round((VL - l) / 2), y: b0.y + b0.a + 10, l: l, a: a };
+}
+
 function desenharMenu() {
   ctx.globalAlpha = 0.55;
   ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
@@ -3656,6 +3805,18 @@ function desenharMenu() {
           bo.y + Math.round((bo.a - FONTE_H) / 2) + 1,
           escolhido ? cor : COR.hudFraco, 1);
   }
+
+  /* som */
+  const bs = botaoSom();
+  caixa(bs, COR.painel, SOM.ligado ? COR.disco[5] : COR.hudFraco);
+  const rotS = "som";
+  texto(rotS, bs.x + 6, bs.y + Math.round((bs.a - FONTE_H) / 2),
+        SOM.ligado ? COR.hud : COR.hudFraco, 1);
+  const cx0 = bs.x + bs.l - 22, cy0 = bs.y + 4;
+  ctx.fillStyle = COR.borda;  ctx.fillRect(cx0, cy0, 16, 8);
+  ctx.fillStyle = COR.vazio;  ctx.fillRect(cx0 + 1, cy0 + 1, 14, 6);
+  ctx.fillStyle = SOM.ligado ? COR.disco[5] : COR.hudFraco;
+  ctx.fillRect(cx0 + (SOM.ligado ? 8 : 1), cy0 + 1, 7, 6);
 
   const b = botaoJogar();
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
