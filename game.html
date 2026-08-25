@@ -169,6 +169,9 @@ const CFG = {
 
   /* controle */
   ZONA_MORTA: 4,
+  /* squash & stretch */
+  ELAST_MOLA: 0.16,      // rigidez: quanto maior, mais rápido o repique
+  ELAST_ATRITO: 0.885,    // quanto a mola perde por quadro; perto de 1 balança mais
   /* modo sucção: rodar o dedo em círculo acelera a rotação do buraco */
   ESPIRAL_MIN: 0.7,      // giro acumulado onde o modo começa a valer
   ESPIRAL_MAX: 2,        // e onde chega no máximo (~1,3 volta por segundo)
@@ -1038,7 +1041,23 @@ function botaoJogar() {
 }
 // meio do topo: os contadores ficam nos dois cantos e o X não briga com
 // nenhum deles
-function botaoSair() { return { x: Math.round(VL / 2) - 6, y: 3, l: 12, a: 12 }; }
+/* O X centrado nos DOIS eixos. Antes o vertical era um "+3" chutado e a
+   letra ficava alta dentro da caixinha; agora sai da altura real da fonte.
+   A caixa também tem lado ímpar, para o centro dela cair em cima de um pixel
+   e não entre dois. */
+function desenharBotaoSair() {
+  const b = botaoSair();
+  caixa(b, COR.painel, COR.hudFraco);
+  const l = larguraTexto("X", 1);
+  texto("X", b.x + Math.round((b.l - l) / 2),
+        b.y + Math.round((b.a - FONTE_H) / 2), COR.hud, 1);
+}
+
+// centrado pela LARGURA da caixa, não por VL/2 menos metade chutada:
+// com tela de largura ímpar a diferença é de 1 px, e ela se vê
+const SAIR_L = 13;
+function botaoSair() { return { x: Math.round((VL - SAIR_L) / 2), y: 3,
+                                l: SAIR_L, a: 13 }; }
 function dentro(gx, gy, r, folga) {
   folga = folga || 0;
   return gx >= r.x - folga && gx <= r.x + r.l + folga &&
@@ -1231,6 +1250,7 @@ function reiniciar() {
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
   buraco.enjoo = 0; buraco.surpresa = 0; buraco.fervor = 0;
+  buraco.elast = 0; buraco.elastV = 0;
   estrelas = [];
   for (let i = 0; i < alvoEstrelas(); i++) estrelas.push(novaEstrela(buraco));
   rivais = TODOS_RIVAIS.slice(0, limitar(CFG.RIVAIS, 1, CFG.RIVAIS_MAX));
@@ -1240,7 +1260,7 @@ function reiniciar() {
     r.nivel = 0; r.comidas = 0; r.progresso = 0;
     r.vx = r.vy = 0; r.pulso = 0; r.boca = 0; r.atordoado = 0;
     r.alvo = null; r.pensar = 0; r.enjoo = 0; r.surpresa = 0; r.fervor = 0;
-    r.presa = null; r.perseguindo = 0;
+    r.presa = null; r.perseguindo = 0; r.elast = 0; r.elastV = 0;
     r.tiro = 0; r.recargaTiro = 0; r.dreno = 0; r.ritmoDreno = 0; r.imune = 0;
     // espalhados em leque à mesma distância: ninguém começa com vantagem
     const a = -Math.PI / 2 + (i + 1) / (rivais.length + 1) * Math.PI * 2;
@@ -1383,6 +1403,29 @@ const SFX = {
     notas.forEach((f, i) => tom(f, f, 0.22, "triangle", 0.22, i * 0.13));
   }
 };
+
+/* ── squash & stretch ─────────────────────────────────────────
+   Uma MOLA por personagem, não um decaimento. `elast` é o quanto ele está
+   achatado (positivo = largo e baixo, negativo = alto e fino) e `elastV` a
+   velocidade com que volta. Uma mola ultrapassa o repouso e volta pelo outro
+   lado algumas vezes — é isso que dá o repique, e é a diferença entre um
+   "inchou e murchou" e um corpo com massa.
+   O volume fica quase constante: o que engorda na horizontal afina na
+   vertical, senão o personagem parece só crescer. */
+function molaElastica(p) {
+  const k = CFG.ELAST_MOLA, d = CFG.ELAST_ATRITO;
+  p.elastV = (p.elastV || 0) - (p.elast || 0) * k;
+  p.elastV *= d;
+  p.elast = limitar((p.elast || 0) + p.elastV, -0.42, 0.42);
+  if (Math.abs(p.elast) < 0.002 && Math.abs(p.elastV) < 0.002) {
+    p.elast = 0; p.elastV = 0;
+  }
+}
+
+/* dá um tranco na mola: positivo achata, negativo estica para cima */
+function bater(p, forca) {
+  p.elastV = (p.elastV || 0) + forca;
+}
 
 /* ── controle ────────────────────────────────────────────────── */
 const toque = { ativo: false, ax: 0, ay: 0, x: 0, y: 0, id: null,
@@ -1678,6 +1721,7 @@ function trombada(a, b, ux, uy) {
     p.atordoado = p.imune > 0 ? 0 : CFG.COLISAO_ATORDOA;
     if (p.imune > 0) escudou(p, p.x, p.y);
     p.pulso = 1;
+    bater(p, 0.48);                       // pancada: achatada forte
     p.surpresa = CFG.COLISAO_SURPRESA;
     if (p !== buraco) { p.alvo = null; p.perseguindo = 0; }  // reavalia depois do tranco
   }
@@ -1847,6 +1891,7 @@ function escudou(p, x, y) {
 
 function adoecer(p) {
   if (p === buraco) SFX.cometa();
+  bater(p, 0.26);
   p.enjoo = CFG.COMETA_ENJOO;
   // o cometa não só atrasa: derruba estrelas na batida
   const cai = Math.min(CFG.COMETA_ESTRELAS, p.comidas);
@@ -2239,6 +2284,7 @@ function passoParticulas() {
     if (--a.vida <= 0) aneis.splice(i, 1);
   }
   for (const p of todos()) {
+    molaElastica(p);
     p.pulso *= 0.85;
     // esfria devagar: engolir em sequência mantém o disco aceso, parar apaga
     p.fervor = (p.fervor || 0) * 0.978;
@@ -2337,6 +2383,10 @@ function subiuDeNivel(dono) {
     tremor = 22; flash = CFG.ARCO; flashLado = 36;
     aberr = CFG.ABERRACAO; arco = CFG.ARCO;
     expansao = 1;                                     // a câmera abre e assenta
+    // ANTECIPAÇÃO: estica para cima antes de crescer. A mola devolve o
+    // movimento para baixo sozinha, e é essa ida-e-volta que faz o
+    // crescimento parecer um impulso e não uma troca de número
+    bater(buraco, -0.3);
     SFX.nivel();
     soltarCoracoes(buraco.x, buraco.y, 34, 2.1, 1);   // chuva de corações
   } else {
@@ -2421,6 +2471,7 @@ function engolirEstrela(indice, dono) {
   dono.pulso = 1; dono.boca = 18;
   // marca o quanto ele está comendo agora: o disco de acreção lê disso
   dono.fervor = Math.min(1.6, (dono.fervor || 0) + 0.45);
+  bater(dono, 0.09);                      // engoliu: achata e repica
   if (dono === buraco) SFX.comer(dono.fervor / 1.6);
   aneis.push({ x: e.x, y: e.y, r: 2, vida: 15, total: 15, rival: dono !== buraco,
                pal: dono !== buraco ? paletaDe(dono).disco : null });
@@ -2468,7 +2519,7 @@ function engolirSaturno(dono) {
   saturno = null;
   esperaSaturno = CFG.SATURNO_ESPERA;
   if (cena !== "jogo") return;
-  dono.pulso = 1; dono.boca = 20;
+  dono.pulso = 1; dono.boca = 20; bater(dono, -0.2);
   dono.tiro = CFG.SATURNO_TIRO;
   dono.recargaTiro = 0;
   if (dono !== buraco) { tremor = 6; return; }  // no rival, sem aviso nem clarão
@@ -2525,6 +2576,7 @@ function passoBlocos(L) {
       const quantas = Math.min(CFG.SATURNO_DANO, vitima.comidas);
       if (quantas > 0) perderEstrelas(vitima, quantas, "gelo");
       vitima.pulso = 1; vitima.boca = 14;
+      bater(vitima, 0.2);
       vitima.surpresa = Math.max(vitima.surpresa, 18);
       // levar tiro sacode mais do que acertar: o baque é de quem apanha
       tremor = Math.max(tremor, vitima === buraco ? 14 : 6);
@@ -2568,6 +2620,7 @@ function arrancarEstrela(de, vitima) {
   perderEstrelas(vitima, 1, "dreno");
   vitima.pulso = 1;
   vitima.boca = 14;
+  bater(vitima, 0.08);
   vitima.surpresa = Math.max(vitima.surpresa, 20);
   // 3 estrelas por segundo: um safanão a cada uma viraria trepidação contínua
   tremor = Math.max(tremor, vitima === buraco ? 3 : 1.5);
@@ -2626,7 +2679,7 @@ function engolirNetuno(dono) {
   netuno = null;
   esperaNetuno = CFG.NETUNO_ESPERA;
   if (cena !== "jogo") return;
-  dono.pulso = 1; dono.boca = 20;
+  dono.pulso = 1; dono.boca = 20; bater(dono, -0.24);
   dono.imune = CFG.NETUNO_IMUNE;
   if (dono !== buraco) { tremor = 6; return; }
   anunciar("INVINCIBLE!", COR.netunoTexto, true);
@@ -2648,7 +2701,7 @@ function engolirJupiter(dono) {
   jupiter = null;
   esperaJupiter = CFG.JUPITER_ESPERA;
   if (cena !== "jogo") return;
-  dono.pulso = 1; dono.boca = 20;
+  dono.pulso = 1; dono.boca = 20; bater(dono, -0.2);
   dono.dreno = CFG.JUPITER_DRENO;
   dono.ritmoDreno = CFG.JUPITER_RITMO;
   if (dono !== buraco) { tremor = 6; return; }  // no rival, sem aviso nem clarão
@@ -3023,9 +3076,12 @@ function desenharMundo() {
 function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   const bx = paraTelaX(p.x), by = paraTelaY(p.y);
   const r = raio * (1 + p.pulso * 0.14);        // dá uma inchadinha ao engolir
+  // squash & stretch: o que ganha de largura perde de altura
+  const e = p.elast || 0;
+  const rx = r * (1 + e), ry = r * (1 - e * 0.82);
 
   ctx.globalAlpha = 0.4;                        // halo macio
-  disco(bx, by, r + 5, halo);
+  oval(bx, by, rx + 5, ry + 5, halo);
   ctx.globalAlpha = 1;
 
   // invencível: o anel roda em arco-íris, com um halo largo e macio por baixo.
@@ -3125,15 +3181,17 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
                                      % COR.arcoiris.length + COR.arcoiris.length))
                          % COR.arcoiris.length]
           : paleta[Math.min(N - 1, Math.floor(inten * N))];
-        px(bx + Math.cos(a) * rr, by + Math.sin(a) * rr, cor);
+        // o anel acompanha o corpo: se ele achata, o anel achata junto,
+        // senão o disco descola e o personagem parece dentro de um aro rígido
+        px(bx + Math.cos(a) * rr * (rx / r), by + Math.sin(a) * rr * (ry / r), cor);
       }
     }
   }
   ctx.globalAlpha = 1;
 
   // o corpo é claro: precisa de um fio de contorno para ter silhueta
-  disco(bx, by, r, contorno);
-  disco(bx, by, r - 1, COR.corpo);
+  oval(bx, by, rx, ry, contorno);
+  oval(bx, by, rx - 1, ry - 1, COR.corpo);
 
   // enjoado: o corpo continua branco — quem fica verde é o anel, lá em cima —
   // e sobem bolhinhas de mal-estar
@@ -3150,7 +3208,7 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
     }
     ctx.globalAlpha = 1;
   }
-  if (CFG.ROSTO) desenharRosto(p, bx, by, r, blush);
+  if (CFG.ROSTO) desenharRosto(p, bx, by, r, blush, rx / r, ry / r);
   if (p === primeiro && cena !== "menu") desenharCoroa(p, bx, by, r);
 
   if (p === buraco && flash > 0 && flash % 6 < 3) {
@@ -3327,10 +3385,18 @@ function gotaDeSuor(bx, by, r, t) {
 }
 
 /* a carinha: olhos que espiam para onde ele está indo, bochechas e um sorriso */
-function desenharRosto(p, bx, by, r, blush) {
+function desenharRosto(p, bx, by, r, blush, ex, ey) {
+  ex = ex || 1; ey = ey || 1;
+  /* Os olhos ARRASTAM atrás da mudança de direção em vez de saltar junto.
+     É "overlapping action": partes leves chegam depois do corpo, e são elas
+     que dão vida — olho que gruda na direção nova no mesmo quadro parece
+     desenho técnico. */
   const v = Math.hypot(p.vx, p.vy);
-  const ox = v > 0.01 ? (p.vx / v) * r * 0.1 : 0;
-  const oy = v > 0.01 ? (p.vy / v) * r * 0.1 : 0;
+  const alvoX = v > 0.01 ? (p.vx / v) * r * 0.11 : 0;
+  const alvoY = v > 0.01 ? (p.vy / v) * r * 0.11 : 0;
+  p.olhoX = (p.olhoX || 0) + (alvoX - (p.olhoX || 0)) * 0.16;
+  p.olhoY = (p.olhoY || 0) + (alvoY - (p.olhoY || 0)) * 0.16;
+  const ox = p.olhoX, oy = p.olhoY;
   const t = r < 11 ? 0 : r < 15 ? 1 : r < 20 ? 2 : r < 25 ? 3 : 4;
   const sep = Math.max(3, r * 0.4);
 
@@ -3356,13 +3422,13 @@ function desenharRosto(p, bx, by, r, blush) {
   if (t >= 1 && !doente) {
     ctx.globalAlpha = 0.62;
     const dist = sep + olho[0].length / 2 + 1.5;
-    carimbo(BOCHECHAS[t], bx - dist + ox, by + r * 0.26 + oy, blush);
-    carimbo(BOCHECHAS[t], bx + dist + ox, by + r * 0.26 + oy, blush);
+    carimbo(BOCHECHAS[t], bx - dist * ex + ox, by + r * 0.26 * ey + oy, blush);
+    carimbo(BOCHECHAS[t], bx + dist * ex + ox, by + r * 0.26 * ey + oy, blush);
     ctx.globalAlpha = 1;
   }
-  carimbo(olho, bx - sep + ox, by - r * 0.13 + oy, COR.rosto);
-  carimbo(olho, bx + sep + ox, by - r * 0.13 + oy, COR.rosto);
-  carimbo(boca, bx + ox, by + r * 0.34 + oy, COR.rosto);
+  carimbo(olho, bx - sep * ex + ox, by - r * 0.13 * ey + oy, COR.rosto);
+  carimbo(olho, bx + sep * ex + ox, by - r * 0.13 * ey + oy, COR.rosto);
+  carimbo(boca, bx + ox, by + r * 0.34 * ey + oy, COR.rosto);
 }
 
 /* Estouro arco-íris: sete faixas concêntricas abrindo a partir do
@@ -3622,11 +3688,15 @@ function desenharAnuncio() {
   if (!anuncio) return;
   if (--anuncio.vida <= 0) { anuncio = null; return; }
   const p = 1 - anuncio.vida / anuncio.total;        // 0 no começo, 1 no fim
-  // estufa nos primeiros quadros e depois assenta
-  const tam = p < 0.14 ? 1 : 2;
+  const tam = p < 0.1 ? 1 : 2;                       // estufa e assenta
   const l = larguraTexto(anuncio.txt, tam);
   const x = Math.round((VL - l) / 2);
-  const y = Math.round(VA * 0.33 - p * 14);          // sobe enquanto some
+  /* Sobe DEVAGAR e vai ACELERANDO (slow in): com subida linear o texto parece
+     puxado por um fio. E logo na entrada ele passa um pouco do lugar e volta,
+     que é o repique que o olho espera de algo que aparece de repente. */
+  const subida = Math.pow(p, 1.9) * 16;
+  const repique = p < 0.3 ? Math.sin(p / 0.3 * Math.PI) * 3.5 : 0;
+  const y = Math.round(VA * 0.33 - subida + repique);
   const a = p > 0.7 ? (1 - p) / 0.3 : 1;             // só apaga no fim
 
   const desloc = Math.floor(quadro * 0.22);
@@ -3694,9 +3764,7 @@ function desenharHUD() {
   if (flash > 0) textoCentro("CRESCEU!", Math.round(VA * 0.21), COR.coracao[1], 2);
   desenharAnuncio();
 
-  const b = botaoSair();
-  caixa(b, COR.painel, COR.hudFraco);
-  texto("X", b.x + Math.round((b.l - larguraTexto("X", 1)) / 2), b.y + 3, COR.hud, 1);
+  desenharBotaoSair();
 }
 
 /* tela de fim: quem chegou ao nível 12 e quantas estrelas cada um juntou */
@@ -3784,9 +3852,7 @@ function desenharFim() {
   texto("de novo", b.x + Math.round((b.l - larguraTexto("de novo", 2)) / 2),
         b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
 
-  const bs = botaoSair();
-  caixa(bs, COR.painel, COR.hudFraco);
-  texto("X", bs.x + Math.round((bs.l - larguraTexto("X", 1)) / 2), bs.y + 3, COR.hud, 1);
+  desenharBotaoSair();
 }
 
 /* Um quadradinho por opção de número de oponentes, logo acima do JOGAR. */
@@ -3803,30 +3869,48 @@ function botaoOponente(i) {
 /* liga/desliga o som: só o ícone da caixinha, sem rótulo nem chave */
 function botaoSom() {
   const b0 = botaoOponente(0);
-  return { x: Math.round(VL / 2) - 8, y: b0.y + b0.a + 10, l: 16, a: 14 };
+  return { x: Math.round(VL / 2) - 8, y: b0.y + b0.a + 10, l: 17, a: 11 };
 }
 
-/* caixinha de som desenhada a mão: corpo, cone e as ondas (ou o X) */
+/* Caixinha de som como SPRITE, do jeito que o resto do jogo desenha coisa
+   pequena. A versão anterior era feita com contas de cone e arcos e saía
+   torta: em 9 px de altura não há espaço para arredondar nada por fórmula,
+   cada pixel tem de ser escolhido. */
+const ICONE_CAIXA = [
+  "....#",
+  "...##",
+  "..###",
+  "#####",
+  "#####",
+  "#####",
+  "..###",
+  "...##",
+  "....#"
+];
+const ICONE_ONDAS = [
+  "....",
+  "...#",
+  "...#",
+  ".#.#",
+  ".#.#",
+  ".#.#",
+  "...#",
+  "...#",
+  "...."
+];
+const ICONE_MUDO = [
+  "#...#",
+  ".#.#.",
+  "..#..",
+  ".#.#.",
+  "#...#"
+];
+
 function desenharIconeSom(x, y, ligado) {
   const c = ligado ? COR.disco[5] : COR.hudFraco;
-  ctx.fillStyle = c;
-  ctx.fillRect(x, y + 4, 3, 4);                  // corpo
-  for (let i = 0; i < 4; i++)                    // cone abrindo
-    ctx.fillRect(x + 3 + i, y + 3 - i + 1, 1, 2 + i * 2);
-  if (ligado) {
-    for (let i = 0; i < 2; i++) {                // duas ondas
-      const r = 3 + i * 3;
-      // passo fino: com poucos pontos a onda sai pontilhada e some no ícone
-      for (let a = -0.75; a <= 0.75; a += 0.12)
-        ctx.fillRect(Math.round(x + 8 + Math.cos(a) * r),
-                     Math.round(y + 6 + Math.sin(a) * r), 1, 1);
-    }
-  } else {
-    for (let i = 0; i < 4; i++) {                // um X no lugar das ondas
-      ctx.fillRect(x + 9 + i, y + 3 + i, 1, 1);
-      ctx.fillRect(x + 12 - i, y + 3 + i, 1, 1);
-    }
-  }
+  carimbo(ICONE_CAIXA, x + 3, y + 5, c);
+  if (ligado) carimbo(ICONE_ONDAS, x + 10, y + 5, c);
+  else carimbo(ICONE_MUDO, x + 11, y + 5, c);
 }
 
 function desenharMenu() {
