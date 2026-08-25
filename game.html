@@ -147,6 +147,7 @@ const CFG = {
   COLISAO_ESPERA: 50,    // quadros de carência para não trombar em sequência
   COLISAO_SURPRESA: 50,  // quadros de cara de espanto depois da pancada
   ANUNCIO: 80,           // quadros que o aviso do efeito fica na tela
+  DANO_FLASH: 22,        // quadros do pisca vermelho ao perder estrela
   COLISAO_TREMOR: 52,
   COLISAO_ABERR: 44,
   COLISAO_CUSTA_NIVEL: true,   // a perda também tira progresso, não só o contador
@@ -218,6 +219,7 @@ const PALETAS = {
     coracao:["#e04d8c","#f56fa4","#ffbcd6"],
     arcoiris:["#ff9ec4","#ffc39a","#ffe98a","#a8e6a1","#8fe3ef","#9fc0ff","#cba6ff"],
     coroa:  ["#fff3c4","#ffd85c","#e0a52c"],
+    dano:   "#ff2d55",
     cadente:["#ffe9a8","#ffd166","#f0b53f"],
     // verde-claro de propósito: o cometa era azul e se confundia com o turbo
     cometa: ["#f3fdf7","#cdf4de","#a0e7c2","#6ed4a4","#42b583"],
@@ -295,6 +297,7 @@ const PALETAS = {
     coracao:["#ff7cc4","#ff9ecb","#ffc4dc"],
     arcoiris:["#ff6fb4","#ffab6a","#ffe06a","#7de08a","#5fd8ef","#7aa8ff","#b48cff"],
     coroa:  ["#fff8db","#ffd85c","#c98a1e"],
+    dano:   "#ff2d55",
     cadente:["#fff3c7","#ffd166","#e0a52c"],
     cometa: ["#eafff3","#9df0c4","#5fdda2","#31bd80","#1c8f5f"],
     enjoo:  "#4fc98f",
@@ -381,15 +384,19 @@ const FUNDO_PB = {
      desde o começo, e no fundo preto ele finalmente pode ser preto — o que
      dá a silhueta é o disco de acreção em volta, que é como a coisa funciona
      de verdade. Bochecha, disco, planetas e efeitos mantêm a cor. */
-  corpo:  "#07070c",
+  corpo:  "#020203",
   rosto:  "#ffffff",
   nebs: [NUVEM_PB, NUVEM_PB, NUVEM_PB, NUVEM_PB],
-  poeira: ["#0c0a16","#110e1e","#171328"],
+  /* Tudo que não é informação afunda: poeira quase invisível, painel colado
+     no preto, trilho de barra escuro. Contraste alto não é clarear o que
+     importa, é escurecer o que não importa — no branco esses tons davam
+     estrutura, no preto eles só levantavam o piso da imagem. */
+  poeira: ["#050509","#08080e","#0c0c14"],
   estrela: "#ffffff",
-  estrelaSuave: "#9c90b8",
-  painel: "#0c0818",
-  borda:  "#241d33",
-  hudFraco: "#8a7c9c"
+  estrelaSuave: "#6f6486",
+  painel: "#040406",
+  borda:  "#16121f",
+  hudFraco: "#6b5f7d"
 };
 /* guarda o que estava valendo, para conseguir voltar */
 const FUNDO_ORIGINAL = {};
@@ -1184,6 +1191,7 @@ let anuncio = null;
 /* declarado aqui e não junto de anunciarDepois: reiniciar() roda na
    abertura e mexe nele, antes de o resto do arquivo existir */
 let anuncioAdiado = null;
+let flashDano = 0;      // pisca vermelho nas laterais quando VOCÊ perde estrela
 let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, arco = 0, quadro = 0;
 let esperaColisao = 0, cadente = null, esperaCadente = 0;
 let cometa = null, esperaCometa = 0, flashEnjoo = 0;
@@ -1364,7 +1372,7 @@ function reiniciar() {
   buraco.dreno = 0; buraco.ritmoDreno = 0;
   netuno = null; esperaNetuno = CFG.NETUNO_ESPERA; flashAzul = 0;
   buraco.imune = 0;
-  anuncio = null; anuncioAdiado = null;
+  anuncio = null; anuncioAdiado = null; flashDano = 0;
   cam.x = buraco.x - visaoL() / 2;
   cam.y = buraco.y - visaoA() / 2;
 }
@@ -2400,13 +2408,14 @@ function passoParticulas() {
   if (flashTiro > 0) flashTiro--;
   if (flashRoxo > 0) flashRoxo--;
   if (flashAzul > 0) flashAzul--;
+  if (flashDano > 0) flashDano--;
   if (coroaAnim > 0) coroaAnim = Math.max(0, coroaAnim - 0.022);
   if (buraco.imune > 0) buraco.imune--;
   for (const r of rivais) if (r.imune > 0) r.imune--;
   // a tela nunca fica parada durante o efeito: um tremor de fundo baixinho
   // tremor de fundo do dreno: baixo o bastante para dar inquietação sem
   // atrapalhar a mira. Antes era 3,5 e a tela não parava quieta
-  if (todos().some(p => p.dreno > 0)) tremor = Math.max(tremor, drenando ? 1.2 : 0.7);
+  if (buraco.dreno > 0) tremor = Math.max(tremor, drenando ? 1.2 : 0.7);
   if (ima > 0) { ima--; faiscarIma(); if (quadro % 2 === 0) faiscarIma(); }
   if (flashEnjoo > 0) flashEnjoo--;
   if (buraco.surpresa > 0) buraco.surpresa--;
@@ -2548,6 +2557,10 @@ function perderEstrelas(dono, n, origem) {
   }
   const antes = dono.comidas;
   dono.comidas = Math.max(0, dono.comidas - n);
+  /* Um aviso só para TODO tipo de dano: trombada, gelo, dreno ou cometa. O
+     jogador não precisa decorar uma cor por arma — vermelho na borda quer
+     dizer "está saindo estrela de você", e o texto no meio diz quanto. */
+  if (dono === buraco && antes > dono.comidas) flashDano = CFG.DANO_FLASH;
   // só o que sai de VOCÊ vira aviso; o resto o placar já conta
   if (dono === buraco && origem && antes > dono.comidas) {
     const tirou = antes - dono.comidas;
@@ -2742,7 +2755,7 @@ function arrancarEstrela(de, vitima) {
   vitima.surpresa = Math.max(vitima.surpresa, 20);
   // 3 estrelas por segundo: um safanão a cada uma viraria trepidação contínua
   tremor = Math.max(tremor, vitima === buraco ? 3 : 1.5);
-  flashRoxo = Math.max(flashRoxo, 14);
+  if (de === buraco) flashRoxo = Math.max(flashRoxo, 14);
   aneis.push({ x: vitima.x, y: vitima.y, r: 2, vida: 14, total: 14, rival: vitima !== buraco, pal: vitima !== buraco ? paletaDe(vitima).disco : null });
   const rr = vitima === buraco ? raioMundo() : raioMundoNivel(vitima.nivel);
   const a = Math.random() * Math.PI * 2;
@@ -3348,11 +3361,17 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
         if (inten < 0.3) continue;
         // no arco-íris a cor vem do ÂNGULO, não da intensidade: é o que faz as
         // faixas girarem junto com o anel em vez de ficarem paradas
-        const cor = iris
+        /* A escada de cor vai do claro (índice 0) ao escuro (N-1), e o disco
+         escolhe pelo brilho: no fundo BRANCO, mais intenso = mais escuro, que
+         é o que se destaca. No fundo PRETO isso se inverte — o trecho mais
+         forte do anel virava o mais apagado. Aqui a escada é lida de trás
+         para frente, e a frente do disco volta a ser a parte que brilha. */
+      const idx = Math.min(N - 1, Math.floor(inten * N));
+      const cor = iris
           ? COR.arcoiris[Math.floor(((a - giro * 1.6) / (Math.PI * 2) * COR.arcoiris.length
                                      % COR.arcoiris.length + COR.arcoiris.length))
                          % COR.arcoiris.length]
-          : paleta[Math.min(N - 1, Math.floor(inten * N))];
+          : paleta[CFG.FUNDO_PB ? Math.max(0, N - 1 - idx) : idx];
         // o anel acompanha o corpo: se ele achata, o anel achata junto,
         // senão o disco descola e o personagem parece dentro de um aro rígido
         px(bx + Math.cos(a) * rr * (rx / r), by + Math.sin(a) * rr * (ry / r), cor);
@@ -3651,10 +3670,31 @@ function desenharClaraoIma() {
 
 /* Enquanto Júpiter dura: clarão roxo nas laterais (mais forte a cada estrela
    roubada) e um tremor de fundo baixinho, para a tela nunca ficar parada. */
+/* Pisca vermelho na borda: você está perdendo estrela, seja lá de quem for.
+   Fica DEPOIS dos outros brilhos na ordem de desenho, para não ser abafado
+   pelo roxo ou pelo dourado de um poder que esteja rolando ao mesmo tempo. */
+function desenharBrilhoDano() {
+  if (flashDano <= 0) return;
+  const p = flashDano / CFG.DANO_FLASH;
+  const larg = Math.max(6, Math.round(VL * 0.24));
+  for (let i = 0; i < larg; i++) {
+    const t = 1 - i / larg;
+    const a = Math.pow(t, 1.6) * p * 0.95 * forcaFlash();
+    if (a <= 0.012) continue;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = COR.dano;
+    ctx.fillRect(i, 0, 1, VA);
+    ctx.fillRect(VL - 1 - i, 0, 1, VA);
+  }
+  ctx.globalAlpha = 1;
+}
+
 function desenharBrilhoRoxo() {
-  // o campo aparece com o poder de qualquer um dos dois: quem está apanhando
-  // também precisa ver que tem um dreno rolando
-  const ativo = todos().some(p => p.dreno > 0);
+  // Só quando O JOGADOR está drenando. Antes acendia com o poder de qualquer
+   // um, e a tela ficava roxa por causa de uma briga do outro lado do mapa —
+   // parecia que o efeito era seu quando não era. Quem está APANHANDO tem o
+   // aviso vermelho, que é a informação certa para ele.
+  const ativo = buraco.dreno > 0;
   if (!ativo && flashRoxo <= 0) return;
   const base = ativo ? 0.26 + 0.1 * Math.sin(quadro * 0.12) : 0;
   const p = Math.max(base, flashRoxo > 0 ? flashRoxo / CFG.JUPITER_CLARAO : 0);
@@ -4269,7 +4309,7 @@ function vinheta() {
    mistura "saturation" do canvas, que é barato porque não sai do compositor.
    Roda antes do HUD de propósito. */
 function campoRoxo() {
-  const d = Math.max.apply(null, todos().map(p => p.dreno));
+  const d = buraco.dreno;                // idem: a saturação é do poder SEU
   if (d <= 0) return;
   // sobe rápido e desce no fim, para não cortar seco quando o poder acaba
   const f = Math.min(1, (CFG.JUPITER_DRENO - d) / 12) * Math.min(1, d / 40);
@@ -4358,6 +4398,7 @@ function desenhar() {
   desenharClaraoEnjoo();
   desenharBrilhoRoxo();
   desenharBrilhoLateral();
+  desenharBrilhoDano();
   redemoinho();
   campoRoxo();
   vinheta();
