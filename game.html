@@ -32,7 +32,11 @@
 /* ── parâmetros (mexa aqui pra ajustar o jogo) ───────────────── */
 const CFG = {
   /* estrelas */
-  ESTRELAS: 30,          // estrelas no campo no nível 0 (cresce junto com o mundo)
+  /* Caiu de 30 para 20. É o único parâmetro que alonga a partida de verdade:
+     medido, mexer no raio inicial ou no alcance da sucção muda 3 a 6 s, e
+     mexer na densidade muda 40 s (57 s → 100 s). Campo mais ralo obriga a
+     caçar em vez de aspirar o que já está debaixo do nariz. */
+  ESTRELAS: 20,          // estrelas no campo no nível 0 (cresce junto com o mundo)
   DENSIDADE_FIXA: true,  // manter a mesma densidade quando o universo se expande
 
   /* crescimento */
@@ -42,11 +46,12 @@ const CFG = {
   NIVEL_MAX: 16,         // teto de TAMANHO, não de vitória: sem isso ele
                          // engoliria a tela. 300 estrelas caem por volta do
                          // nível 15, então o teto quase nunca é encostado
-  /* Começa maior: em raio 12 o rosto caía no segundo menor jogo de sprites
-     e o personagem ficava tosco. Em 17 ele já nasce no terceiro, com olhos,
-     bochecha e boca desenhados com folga. */
-  RAIO_BASE: 17,         // raio APARENTE (na tela) no nível 0
-  RAIO_TELA_PASSO: 1.6,  // quanto o raio aparente cresce por nível
+  /* 15 é o MENOR raio que ainda cai no terceiro jogo de sprites de rosto (o
+     corte no desenho do rosto é em r < 15). Abaixo disso o personagem perde
+     bochecha e boca desenhadas com folga e fica tosco, que foi o problema do
+     raio 12. O passo subiu junto para o tamanho final não encolher. */
+  RAIO_BASE: 15,         // raio APARENTE (na tela) no nível 0
+  RAIO_TELA_PASSO: 1.7,  // quanto o raio aparente cresce por nível
 
   /* universo em expansão */
   /* A câmera abre PROGRESSIVAMENTE: cada nível revela mais campo que o
