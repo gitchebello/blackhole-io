@@ -70,13 +70,13 @@ const CFG = {
   GIRO_SUCCAO: 1.2,      // quanto a estrela rodopia enquanto é sugada
 
   /* Terra */
-  TERRA_RAIO: 8,         // raio aparente da Terra, na tela
+  TERRA_RAIO: 9,         // raio aparente da Terra, na tela
   TERRA_ESPERA: 600,     // quadros até uma nova Terra aparecer (600 = 10s)
   TERRA_TURBO: 600,      // duração do turbo (600 = 10s)
   TERRA_FATOR: 1.5,      // multiplicador de velocidade do turbo
 
   /* Marte — o planeta vermelho: vira ímã por um tempo */
-  MARTE_RAIO: 8,         // do mesmo tamanho da Terra
+  MARTE_RAIO: 9,         // do mesmo tamanho da Terra
   MARTE_ESPERA: 600,     // mesma frequência da Terra (600 = 10s)
   MARTE_IMA: 300,        // duração do ímã (300 = 5s)
   MARTE_ALCANCE: 1.35,   // quanto o alcance de sucção estica no ímã
@@ -84,7 +84,7 @@ const CFG = {
   MARTE_CLARAO: 24,      // flash vermelho ao devorá-lo
 
   /* Saturno — o dos anéis: vira uma torre de gelo por um tempo */
-  SATURNO_RAIO: 8,
+  SATURNO_RAIO: 9,
   SATURNO_ESPERA: 600,   // mesma frequência da Terra e de Marte (600 = 10s)
   SATURNO_TIRO: 480,     // duração do poder (480 = 8s)
   SATURNO_CADENCIA: 40,  // quadros entre um bloco e o outro
@@ -98,7 +98,7 @@ const CFG = {
   SATURNO_CLARAO: 24,
 
   /* Júpiter — o gigante roxo: rouba estrelas de perto */
-  JUPITER_RAIO: 8,
+  JUPITER_RAIO: 9,
   JUPITER_ESPERA: 600,   // mesma frequência dos outros planetas
   JUPITER_DRENO: 600,    // duração do poder (600 = 10s)
   JUPITER_RITMO: 20,     // 3 estrelas por segundo
@@ -106,7 +106,7 @@ const CFG = {
   JUPITER_CLARAO: 26,
 
   /* Netuno — o azul profundo: escudo total por um tempo */
-  NETUNO_RAIO: 8,
+  NETUNO_RAIO: 9,
   NETUNO_ESPERA: 600,    // mesma frequência dos outros planetas
   NETUNO_IMUNE: 600,     // 10s sem levar golpe nenhum
   NETUNO_CLARAO: 26,
@@ -164,6 +164,7 @@ const CFG = {
   COMETA_RAIO: 14,        // bem maior que a cadente: é obstáculo, não prêmio
   COMETA_ENJOO: 300,        // duração do enjoo (300 = 5s)
   COMETA_FREIO: 0.75,      // fica com 75% da velocidade enquanto durar
+  COMETA_ESTRELAS: 5,      // e ainda derruba este tanto de estrelas
   COMETA_RABO: 34,         // comprimento do rastro azul
   ABERRACAO_MAX: 2,      // deslocamento máximo dos canais, em pixels
 
@@ -706,128 +707,127 @@ function meiaLinha(R, dy) {
 }
 
 /* ── planetas ────────────────────────────────────────────────
-   Um gerador só para os cinco. Antes cada um tinha seu laço, com iluminação
-   de duas linhas e três tons por material — o resultado eram bolinhas chapadas
-   que só mudavam de cor.
+   Um gerador só para os cinco, e UM QUADRO cada: eles não giram mais. A
+   rotação em torno do próprio eixo era animação por animação — num sprite de
+   19 px ela não conta história nenhuma e ainda embaralhava a leitura da
+   superfície a cada sete quadros. Parados, dá para desenhar de verdade.
 
-   Aqui a esfera é iluminada de verdade:
+   A esfera é iluminada de verdade:
    · DIFUSA por normal de esfera (N·L), e não por um gradiente em dx+dy;
    · ESPECULAR, o ponto claro do lado da luz, que é o que dá o "brilho de
      bola" — sem ele nenhuma esfera pequena convence;
-   · LUZ DE BORDA no limbo escuro, um fio mais claro do lado oposto à luz.
-     É o truque mais barato para descolar o planeta do fundo, e nenhum dos
-     cinco tinha.
+   · LUZ DE BORDA no limbo escuro, um fio mais claro do lado oposto à luz,
+     que é o jeito mais barato de descolar o planeta do fundo.
 
-   Cada planeta entrega só uma função de superfície, que devolve QUAL material
-   está naquele ponto (oceano, continente, gelo, mancha...). O sombreamento é
-   o mesmo para todos, então eles parecem do mesmo mundo. */
+   Cada planeta entrega só quais materiais existem e uma função que diz qual
+   deles está em cada ponto, em coordenadas de -1 a 1. Sem giro, as manchas
+   são POSICIONADAS À MÃO, o que dá muito mais controle que ruído procedural
+   nesse tamanho. */
 const LUZ = (() => { const l = [-0.55, -0.6, 0.58];
   const m = Math.hypot(l[0], l[1], l[2]);
   return [l[0]/m, l[1]/m, l[2]/m]; })();
 
-function fazerPlaneta(R, quadros, materiais, superficie) {
+function fazerPlaneta(R, materiais, superficie) {
   const D = R * 2 + 1;
   const cv = document.createElement("canvas");
-  cv.width = D * quadros; cv.height = D;
+  cv.width = D; cv.height = D;
   const fx = cv.getContext("2d");
   const c = R;
 
-  for (let q = 0; q < quadros; q++) {
-    const giro = q * (Math.PI * 2 / quadros);
-    for (let y = 0; y < D; y++) {
-      const dy = y - c;
-      const w = meiaLinha(R, dy);
-      if (w < 0) continue;
-      for (let x = c - w; x <= c + w; x++) {
-        const dx = x - c;
-        // normal da esfera no ponto
-        const d2 = (dx * dx + dy * dy) / ((R + 0.5) * (R + 0.5));
-        const nz = Math.sqrt(Math.max(0.001, 1 - d2));
-        const nx = dx / (R + 0.5), ny = dy / (R + 0.5);
+  for (let y = 0; y < D; y++) {
+    const dy = y - c;
+    const w = meiaLinha(R, dy);
+    if (w < 0) continue;
+    for (let x = c - w; x <= c + w; x++) {
+      const dx = x - c;
+      const nx = dx / (R + 0.5), ny = dy / (R + 0.5);
+      const nz = Math.sqrt(Math.max(0.001, 1 - nx * nx - ny * ny));
 
-        const dif = Math.max(0, nx * LUZ[0] + ny * LUZ[1] + nz * LUZ[2]);
-        // especular: um ponto claro, concentrado, do lado da luz
-        const esp = Math.pow(dif, 18) * 0.9;
-        // luz de borda: acende o limbo do lado oposto ao sol
-        const borda = Math.pow(1 - nz, 3.2) * (1 - dif) * 0.85;
+      const dif = Math.max(0, nx * LUZ[0] + ny * LUZ[1] + nz * LUZ[2]);
+      const esp = Math.pow(dif, 20);
+      const borda = Math.pow(1 - nz, 3.2) * (1 - dif) * 0.9;
+      const luz = dif * 0.8 + 0.16 + borda;
 
-        let luz = dif * 0.82 + 0.14 + borda;
-        // latitude e longitude aparentes, para a superfície girar junto
-        const lat = Math.asin(limitar(ny, -1, 1));
-        const lon = Math.atan2(nx, nz) + giro;
-        const mat = materiais[superficie(lon, lat, dy / R, dx / R, giro)];
-        const n = mat.length;
-        let i = Math.round((1 - limitar(luz, 0, 1)) * (n - 1));
-        if (esp > 0.28) i = 0;                   // o brilho estoura para o topo
-        fx.fillStyle = mat[limitar(i, 0, n - 1)];
-        fx.fillRect(q * D + x, y, 1, 1);
-      }
+      const mat = materiais[superficie(nx, ny, nz)];
+      const n = mat.length;
+      let i = Math.round((1 - limitar(luz, 0, 1)) * (n - 1));
+      if (esp > 0.3) i = 0;                      // o brilho estoura para o topo
+      fx.fillStyle = mat[limitar(i, 0, n - 1)];
+      fx.fillRect(x, y, 1, 1);
     }
   }
   return cv;
 }
 
-/* Terra: oceano, continentes e calotas */
+/* mancha oval posicionada à mão, em coordenadas de -1 a 1 */
+const mancha = (nx, ny, cx, cy, rx, ry) => {
+  const a = (nx - cx) / rx, b = (ny - cy) / ry;
+  return a * a + b * b < 1;
+};
+
+/* Terra: oceano, alguns continentes e as calotas */
 const TERRA_D = CFG.TERRA_RAIO * 2 + 1;
-const TERRA_QUADROS = 8;
-const terraSprite = fazerPlaneta(CFG.TERRA_RAIO, TERRA_QUADROS, [
+const terraSprite = fazerPlaneta(CFG.TERRA_RAIO, [
   ["#e8f7ff","#a9d8f2","#6fb4e0","#4a90c8","#2f6ea6","#1d4c7a","#123354"],  // oceano
   ["#eafbe8","#a7e3b4","#6cc98c","#46a86a","#2f8450","#20603a","#144026"],  // terra
   ["#ffffff","#eef9ff","#d2ecf8","#b0d8ec","#8ebdd6","#6c9cb8","#4d7793"]   // gelo
-], (lon, lat, ny) => {
-  if (Math.abs(ny) > 0.74) return 2;
-  return fractal(Math.cos(lon) * 2.6, Math.sin(lon) * 2.6 + ny * 2.4,
-                 CFG.SEMENTE + 5150, 3) > 0.52 ? 1 : 0;
+], (nx, ny) => {
+  if (Math.abs(ny) > 0.78) return 2;
+  if (mancha(nx, ny, -0.3, -0.18, 0.42, 0.34)) return 1;
+  if (mancha(nx, ny, 0.34, 0.3, 0.34, 0.4)) return 1;
+  if (mancha(nx, ny, 0.15, -0.52, 0.26, 0.2)) return 1;
+  return 0;
 });
 
-/* Marte: poeira vermelha, mares escuros e uma calota */
+/* Marte: poeira vermelha, um mar escuro e a calota norte */
 const MARTE_D = CFG.MARTE_RAIO * 2 + 1;
-const MARTE_QUADROS = 8;
-const marteSprite = fazerPlaneta(CFG.MARTE_RAIO, MARTE_QUADROS, [
+const marteSprite = fazerPlaneta(CFG.MARTE_RAIO, [
   ["#ffd2b0","#ff9e70","#f2683f","#d9472a","#b2321d","#872314","#5c150c"],  // poeira
-  ["#d08d6c","#a85436","#832f1c","#65200f","#4c1509","#360d05","#230703"],  // mares
+  ["#e0a184","#bb6448","#98422c","#79301e","#5c2013","#40140b","#2a0c06"],  // mar
   ["#ffffff","#f6ece8","#e2d0c8","#c9b0a6","#a98d84","#886c64","#664e48"]   // calota
-], (lon, lat, ny) => {
-  if (ny < -0.76) return 2;
-  const b = Math.sin(ny * 3.1 + Math.sin(lon * 1.6) * 1.1) +
-            0.5 * Math.sin(ny * 1.4 - lon * 2.1);
-  return b > 0.5 ? 1 : 0;
+], (nx, ny) => {
+  if (ny < -0.8) return 2;
+  if (mancha(nx, ny, 0.12, 0.28, 0.5, 0.3)) return 1;
+  return 0;
 });
 
-/* Júpiter: faixas horizontais e a mancha */
+/* Júpiter: faixas largas e a mancha */
 const JUP_D = CFG.JUPITER_RAIO * 2 + 1;
-const JUP_QUADROS = 8;
-const jupiterSprite = fazerPlaneta(CFG.JUPITER_RAIO, JUP_QUADROS, [
-  // as duas famílias precisam ser bem diferentes: com rampas vizinhas o
-  // sombreamento come a diferença e o planeta vira uma bola lisa
-  ["#fbf4ff","#e9d8fb","#d0b6f2","#b492e2","#9370c4","#6f5199","#4b356b"],  // faixa clara
-  ["#e4d0f8","#bd9ce6","#9673cc","#7355aa","#553d84","#3b2a5e","#251a3d"],  // faixa escura
-  ["#ffe8f0","#ffc0d0","#f090ab","#d06a88","#a84e68","#7d374b","#552332"]   // a mancha
-], (lon, lat, ny) => {
-  const dl = Math.atan2(Math.sin(lon - 1.0), Math.cos(lon - 1.0));
-  if (Math.abs(dl) < 0.62 && Math.abs(ny - 0.22) < 0.2) return 2;
-  return Math.sin(ny * 7.5) > 0 ? 0 : 1;
+const jupiterSprite = fazerPlaneta(CFG.JUPITER_RAIO, [
+  ["#fbf4ff","#e9d8fb","#d0b6f2","#b492e2","#9370c4","#6f5199","#4b356b"],  // clara
+  ["#e4d0f8","#bd9ce6","#9673cc","#7355aa","#553d84","#3b2a5e","#251a3d"],  // escura
+  ["#ffdce8","#f5a8bf","#dd7b98","#b85a78","#8f4159","#682d3e","#451c28"]   // mancha
+], (nx, ny) => {
+  if (mancha(nx, ny, 0.24, 0.22, 0.22, 0.15)) return 2;
+  // três faixas largas, com uma ondulação de leve: reta perfeita vira
+  // código de barras, e o planeta perde o ar de gás em movimento
+  const f = Math.abs(ny + 0.05 * Math.sin(nx * 3.2));
+  if (f < 0.16 || (f > 0.42 && f < 0.66)) return 1;
+  return 0;
 });
 
-/* Saturno: creme com faixas suaves */
+/* Saturno: creme com duas faixas suaves */
 const SAT_D = CFG.SATURNO_RAIO * 2 + 1;
-const SAT_QUADROS = 8;
-const saturnoSprite = fazerPlaneta(CFG.SATURNO_RAIO, SAT_QUADROS, [
+const saturnoSprite = fazerPlaneta(CFG.SATURNO_RAIO, [
   ["#fffdf2","#fff0cc","#f8dda2","#e8c47e","#cba25a","#a17a3e","#6f5027"],
   ["#fdf3dc","#f2dca6","#dfc077","#c4a054","#a17f3c","#7b5f2a","#52401b"]
-], (lon, lat, ny) => Math.sin(ny * 6.2 + Math.sin(lon) * 0.4) > 0 ? 0 : 1);
+], (nx, ny) => {
+  const f = Math.abs(ny + 0.04 * Math.sin(nx * 2.6));
+  return (f > 0.2 && f < 0.44) || f > 0.7 ? 1 : 0;
+});
 
-/* Netuno: azul profundo com uma mancha escura */
+/* Netuno: azul profundo com uma mancha */
 const NET_D = CFG.NETUNO_RAIO * 2 + 1;
-const NET_QUADROS = 8;
-const netunoSprite = fazerPlaneta(CFG.NETUNO_RAIO, NET_QUADROS, [
+const netunoSprite = fazerPlaneta(CFG.NETUNO_RAIO, [
   ["#e6f4ff","#b4d8f8","#7cb0ea","#5389cf","#3765a8","#22467c","#132b52"],
   ["#c2dbf5","#7fabdd","#5182bc","#345f97","#204373","#132b50","#0a1a33"],
-  ["#a8bede","#6f8fbc","#4a6a98","#324c76","#213458","#14213a","#0b1526"]   // mancha
-], (lon, lat, ny) => {
-  const dl = Math.atan2(Math.sin(lon + 0.8), Math.cos(lon + 0.8));
-  if (Math.abs(dl) < 0.5 && Math.abs(ny + 0.18) < 0.16) return 2;
-  return Math.sin(ny * 5.4 + Math.sin(lon) * 0.3) > 0 ? 0 : 1;
+  // bem mais escura que o corpo: no azul, mancha clara lê como falha de
+  // desenho, e não como acidente na atmosfera
+  ["#5c7ba0","#3e5c82","#2a4467","#1b3050","#11213a","#0a1526","#050b16"]   // mancha
+], (nx, ny) => {
+  if (mancha(nx, ny, -0.2, -0.06, 0.22, 0.15)) return 2;
+  const f = Math.abs(ny + 0.045 * Math.sin(nx * 2.9));
+  return (f > 0.26 && f < 0.5) ? 1 : 0;
 });
 
 /* ── desenho em pixel cheio (sem antialias) ──────────────────── */
@@ -1093,6 +1093,7 @@ let primeiro = null;    // quem está com mais estrelas; ganha a coroa
    pouco em pouco — anunciar cada estrela viraria um piscar sem sentido —,
    então acumulam e o total sai quando a agressão para. */
 let perdaAcum = { dreno: 0, gelo: 0 }, perdaEspera = { dreno: 0, gelo: 0 };
+let ganhoDreno = 0, ganhoEspera = 0;   // o que VOCÊ tirou dos outros no dreno
 let coroaAnim = 0;      // 1 no instante em que a coroa troca de cabeça
 const cam = { x: 0, y: 0 };
 
@@ -1227,6 +1228,7 @@ function reiniciar() {
   historico = []; quadroInicio = quadro;
   primeiro = null; coroaAnim = 0;
   perdaAcum = { dreno: 0, gelo: 0 }; perdaEspera = { dreno: 0, gelo: 0 };
+  ganhoDreno = 0; ganhoEspera = 0;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
   buraco.enjoo = 0; buraco.surpresa = 0; buraco.fervor = 0;
@@ -1718,6 +1720,12 @@ function escudou(p, x, y) {
 
 function adoecer(p) {
   p.enjoo = CFG.COMETA_ENJOO;
+  // o cometa não só atrasa: derruba estrelas na batida
+  const cai = Math.min(CFG.COMETA_ESTRELAS, p.comidas);
+  if (cai > 0) {
+    perderEstrelas(p, cai, "cometa");
+    for (let k = 0; k < cai; k++) estrelas.push(estrelaSolta(p, k, cai));
+  }
   p.pulso = 1; p.boca = 24;
   bafo(p.x, p.y, 30, 1.6);
   aneis.push({ x: p.x, y: p.y, r: 3, vida: 20, total: 20, rival: p !== buraco,
@@ -1725,6 +1733,8 @@ function adoecer(p) {
   // a pancada também freia na hora: senão o congelamento demora a ser sentido
   p.vx *= 0.4; p.vy *= 0.4;
   if (p !== buraco) return;
+  // o "-5" sai primeiro em adoecer(); o SPEED DOWN entra logo depois e fica,
+  // então o jogador lê a perda e em seguida o motivo
   anunciar("SPEED DOWN", COR.enjoo);
   tremor = 30;                                  // batida: sacode mais
   aberr = CFG.ABERRACAO;
@@ -2211,6 +2221,10 @@ function anotarPerda(origem, n) {
 }
 
 function passoPerdas() {
+  if (ganhoEspera > 0 && --ganhoEspera <= 0) {
+    if (ganhoDreno > 0) anunciar("+" + ganhoDreno + "!", COR.roxo);
+    ganhoDreno = 0;
+  }
   for (const k in perdaEspera) {
     if (perdaEspera[k] <= 0) continue;
     if (--perdaEspera[k] > 0) continue;
@@ -2234,6 +2248,7 @@ function perderEstrelas(dono, n, origem) {
   if (dono === buraco && origem && antes > dono.comidas) {
     const tirou = antes - dono.comidas;
     if (origem === "trombada") anunciar("-" + tirou, COR.disco[6]);
+    else if (origem === "cometa") anunciar("-" + tirou, COR.enjoo);
     else anotarPerda(origem, tirou);
   }
   if (!CFG.COLISAO_CUSTA_NIVEL) return;
@@ -2431,6 +2446,9 @@ function passoRoubadas() {
     if (e.t >= 1) {
       // chegou: agora sim o ponto entra, com o mesmo estalo de engolir estrela
       ganharEstrelas(p, 1);
+      // o total é contado na CHEGADA, não no arranque: as últimas estrelas
+      // ainda estão voando quando o poder acaba, e elas contam
+      if (p === buraco) { ganhoDreno++; ganhoEspera = CFG.PERDA_ESPERA; }
       p.pulso = 1; p.boca = 16;
       aneis.push({ x: p.x, y: p.y, r: 2, vida: 14, total: 14, rival: p !== buraco, pal: p !== buraco ? paletaDe(p).disco : null });
       faiscar(p.x, p.y, 8, 3, 8);
@@ -2456,7 +2474,7 @@ function engolirNetuno(dono) {
   dono.pulso = 1; dono.boca = 20;
   dono.imune = CFG.NETUNO_IMUNE;
   if (dono !== buraco) { tremor = 6; return; }
-  anunciar("INVINCIBLE!", COR.netunoTexto);
+  anunciar("INVINCIBLE!", COR.netunoTexto, true);
   tremor = 12;
   flashAzul = CFG.NETUNO_CLARAO;
   arco = Math.max(arco, 30);
@@ -2666,8 +2684,7 @@ function desenharMundo() {
       brilho(cxT2, cyT2, CFG.TERRA_RAIO - 1, CFG.TERRA_RAIO + 7 + pT * 2,
              COR.glowTerra, 0.3 + pT * 0.12, 2.4);
       anel(x + CFG.TERRA_RAIO, y + CFG.TERRA_RAIO, CFG.TERRA_RAIO + 1, 1.2, COR.contTerra);
-      const q = Math.floor(terra.quadro / 7) % TERRA_QUADROS;
-      ctx.drawImage(terraSprite, q * TERRA_D, 0, TERRA_D, TERRA_D, x, y, TERRA_D, TERRA_D);
+      ctx.drawImage(terraSprite, x, y);
     }
   }
 
@@ -2682,8 +2699,7 @@ function desenharMundo() {
       brilho(cxM2, cyM2, CFG.MARTE_RAIO - 1, CFG.MARTE_RAIO + 8 + pM * 2,
              COR.glowMarte, 0.34 + pM * 0.14, 2.2);
       anel(x + CFG.MARTE_RAIO, y + CFG.MARTE_RAIO, CFG.MARTE_RAIO + 1, 1.2, COR.contMarte);
-      const q = Math.floor(marte.quadro / 7) % MARTE_QUADROS;
-      ctx.drawImage(marteSprite, q * MARTE_D, 0, MARTE_D, MARTE_D, x, y, MARTE_D, MARTE_D);
+      ctx.drawImage(marteSprite, x, y);
     }
   }
 
@@ -2697,8 +2713,7 @@ function desenharMundo() {
       brilho(cxS, cyS, R - 1, R + 7 + pS * 2, COR.glowSaturno, 0.3 + pS * 0.12, 2.4);
       anelSaturno(cxS, cyS, R, false);          // metade de trás
       anel(cxS, cyS, R + 1, 1.2, COR.contSaturno);
-      const q = Math.floor(saturno.quadro / 7) % SAT_QUADROS;
-      ctx.drawImage(saturnoSprite, q * SAT_D, 0, SAT_D, SAT_D, cxS - R, cyS - R, SAT_D, SAT_D);
+      ctx.drawImage(saturnoSprite, cxS - R, cyS - R);
       anelSaturno(cxS, cyS, R, true);           // metade da frente
     }
   }
@@ -2721,8 +2736,7 @@ function desenharMundo() {
       const pJ = 0.5 + 0.5 * Math.sin(quadro * 0.058 + 3.7);
       brilho(cxJ, cyJ, R - 1, R + 7 + pJ * 2, COR.glowJupiter, 0.28 + pJ * 0.1, 2.4);
       anel(cxJ, cyJ, R + 1, 1.2, COR.contJupiter);
-      const q = Math.floor(jupiter.quadro / 7) % JUP_QUADROS;
-      ctx.drawImage(jupiterSprite, q * JUP_D, 0, JUP_D, JUP_D, cxJ - R, cyJ - R, JUP_D, JUP_D);
+      ctx.drawImage(jupiterSprite, cxJ - R, cyJ - R);
     }
   }
 
@@ -2735,8 +2749,7 @@ function desenharMundo() {
       const pN = 0.5 + 0.5 * Math.sin(quadro * 0.05 + 1.9);
       brilho(cxN, cyN, R - 1, R + 7 + pN * 2, COR.glowNetuno, 0.3 + pN * 0.12, 2.4);
       anel(cxN, cyN, R + 1, 1.2, COR.contNetuno);
-      const q = Math.floor(netuno.quadro / 7) % NET_QUADROS;
-      ctx.drawImage(netunoSprite, q * NET_D, 0, NET_D, NET_D, cxN - R, cyN - R, NET_D, NET_D);
+      ctx.drawImage(netunoSprite, cxN - R, cyN - R);
     }
   }
 
@@ -2881,7 +2894,7 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
        cometa causa. */
     for (let i = 0; i < 3; i++) {
       const t = ((quadro * 0.017 + i / 3) % 1);
-      const base = r + 2 + t * (r * 0.9 + 14);
+      const base = r + 2 + t * (r * 0.6 + 9);   // mais contido que antes
       const torce = t * 2.2 + quadro * 0.02;     // gira enquanto abre
       const esp = 2 + t * 2;
       ctx.globalAlpha = 0.32 * (1 - t) * q;
@@ -2908,8 +2921,11 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
      sozinho): gira mais rápido, ganha um halo, e as voltas anteriores ficam
      na tela com alfa baixo, o que dá o rastro circular. Parado e sem comer,
      tudo isso vai a zero e sobra o anel limpo de antes. */
-  const fervor = Math.min(1, p.fervor || 0);
-  const acel = (comTurbo ? 1 + espiral * 2.6 : 1) * (1 + fervor * 0.9);
+  // no escudo o disco liga no talo: é o momento mais forte do jogo e ele
+  // precisa gritar isso sozinho
+  const fervor = p.imune > 0 ? 1 : Math.min(1, p.fervor || 0);
+  const acel = (comTurbo ? 1 + espiral * 2.6 : 1) * (1 + fervor * 0.9) *
+               (p.imune > 0 ? 1.8 : 1);         // invencível, o disco dispara
   const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04) * acel;
   const N = paleta.length;
   const iris = p.imune > 0;
@@ -2917,19 +2933,28 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   if (fervor > 0.04) {                     // halo que acende junto
     // cor saturada do próprio disco, e não o halo pálido: por cima de uma
     // nebulosa da mesma família, o pálido sumia e só lavava a região
-    brilho(bx, by, r, r + 3 + fervor * 5, iris ? COR.arcoiris[4] : paleta[5],
-           0.09 + fervor * 0.26, 2.4);
+    if (iris) {
+      // no arco-íris o halo é feito de várias cores empilhadas, cada uma um
+      // pouco mais larga: sai um brilho iridescente em vez de um tom só
+      for (let k = 0; k < COR.arcoiris.length; k++)
+        brilho(bx, by, r + k * 0.7, r + 5 + k * 1.5,
+               COR.arcoiris[(k + Math.floor(quadro * 0.12)) % COR.arcoiris.length],
+               0.09, 2.2);
+    } else {
+      brilho(bx, by, r, r + 3 + fervor * 5, paleta[5], 0.09 + fervor * 0.26, 2.4);
+    }
   }
 
   // rastro: as posições por onde o anel passou, cada vez mais apagadas
-  const rastros = fervor > 0.06 ? 3 : 0;
+  // no escudo o rastro é mais longo: é o borrão que dá a leitura de giro
+  const rastros = iris ? 6 : (fervor > 0.06 ? 3 : 0);
   for (let g = rastros; g >= 0; g--) {
-    const atraso = g * (0.12 + fervor * 0.16);
-    const alfa = g === 0 ? 1 : (0.34 - g * 0.08) * fervor;
+    const atraso = g * (iris ? 0.16 : 0.12 + fervor * 0.16);
+    const alfa = g === 0 ? 1 : (iris ? 0.4 - g * 0.05 : (0.34 - g * 0.08) * fervor);
     if (alfa <= 0.02) continue;
     ctx.globalAlpha = alfa;
     for (let k = 0; k < 2; k++) {
-      const rr = r + 1 + k + (g ? g * 0.5 * fervor : 0);
+      const rr = r + 1 + k + (g ? g * (iris ? 0.42 : 0.5 * fervor) : 0);
       const passos = Math.max(20, Math.ceil(rr * 7));
       for (let i = 0; i < passos; i++) {
         const a = (i / passos) * Math.PI * 2;
@@ -3124,6 +3149,26 @@ function desenharCoroa(p, bx, by, r) {
   }
 }
 
+/* A gota de suor do enjoo: escorre da têmpora, some e recomeça. É o sinal
+   mais direto de "não estou bem" que cabe num rosto deste tamanho. */
+function gotaDeSuor(bx, by, r, t) {
+  const ciclo = (quadro % 96) / 96;
+  if (ciclo > 0.62) return;                      // fica um tempo sem gota
+  const q = ciclo / 0.62;
+  const x = bx + r * 0.52;
+  const y = by - r * 0.42 + q * r * 0.5;
+  const c = COR.cometa[3];
+  ctx.globalAlpha = q < 0.85 ? 1 : (1 - q) / 0.15;
+  if (t >= 2) {                                  // gota maior nos bonecos grandes
+    px(x, y - 1, c);
+    px(x - 1, y, c); px(x, y, COR.cometa[1]); px(x + 1, y, c);
+    px(x, y + 1, c);
+  } else {
+    px(x, y, c); px(x, y + 1, c);
+  }
+  ctx.globalAlpha = 1;
+}
+
 /* a carinha: olhos que espiam para onde ele está indo, bochechas e um sorriso */
 function desenharRosto(p, bx, by, r, blush) {
   const v = Math.hypot(p.vx, p.vy);
@@ -3144,6 +3189,7 @@ function desenharRosto(p, bx, by, r, blush) {
   } else if (doente) {
     olho = OLHOS[t];
     boca = BOCAS_TRISTE[t];
+    gotaDeSuor(bx, by, r, t);
   } else {
     olho = OLHOS[t];
     boca = p.boca > 0 ? BOCAS_O[t] : BOCAS[t];
@@ -3376,8 +3422,29 @@ function desenharMarcaRival() {
 /* Aviso do efeito no meio da tela. Entra estufando, sobe devagar e some.
    O brilho é o próprio texto repetido em volta com alfa baixo — o contorno
    branco do texto() sozinho não separa a letra de um fundo colorido. */
-function anunciar(txt, cor) {
-  anuncio = { txt: txt, cor: cor, vida: CFG.ANUNCIO, total: CFG.ANUNCIO };
+function anunciar(txt, cor, iris) {
+  anuncio = { txt: txt, cor: cor, vida: CFG.ANUNCIO, total: CFG.ANUNCIO, iris: !!iris };
+}
+
+/* Escreve letra a letra em arco-íris, as cores correndo pela palavra. Só o
+   aviso do escudo usa isso — é o mesmo arco-íris que toma o disco de acreção,
+   e ver a mesma cor nos dois lugares liga o texto ao efeito sem explicar. */
+function glifosIris(str, x, y, tam, desloc) {
+  let cx = Math.round(x);
+  let i = 0;
+  for (const ch of str) {
+    const g = glifo(ch);
+    const cor = COR.arcoiris[(i + desloc) % COR.arcoiris.length];
+    ctx.fillStyle = cor;
+    for (let ly = 0; ly < FONTE_H; ly++) {
+      const linha = g.linhas[ly];
+      for (let lx = 0; lx < g.larg; lx++)
+        if (linha[g.c0 + lx] === "#")
+          ctx.fillRect(cx + lx * tam, Math.round(y) + ly * tam, tam, tam);
+    }
+    cx += (g.larg + VAO) * tam;
+    if (ch !== " ") i++;
+  }
 }
 
 function desenharAnuncio() {
@@ -3391,15 +3458,31 @@ function desenharAnuncio() {
   const y = Math.round(VA * 0.33 - p * 14);          // sobe enquanto some
   const a = p > 0.7 ? (1 - p) / 0.3 : 1;             // só apaga no fim
 
+  const desloc = Math.floor(quadro * 0.22);
   ctx.globalAlpha = a * (0.16 + 0.12 * Math.sin(quadro * 0.3));
   for (let d = 2; d <= 4; d++) {                     // halo em volta da palavra
-    desenhaGlifos(anuncio.txt, x - d, y, anuncio.cor, tam);
-    desenhaGlifos(anuncio.txt, x + d, y, anuncio.cor, tam);
-    desenhaGlifos(anuncio.txt, x, y - d, anuncio.cor, tam);
-    desenhaGlifos(anuncio.txt, x, y + d, anuncio.cor, tam);
+    if (anuncio.iris) {
+      glifosIris(anuncio.txt, x - d, y, tam, desloc);
+      glifosIris(anuncio.txt, x + d, y, tam, desloc);
+      glifosIris(anuncio.txt, x, y - d, tam, desloc);
+      glifosIris(anuncio.txt, x, y + d, tam, desloc);
+    } else {
+      desenhaGlifos(anuncio.txt, x - d, y, anuncio.cor, tam);
+      desenhaGlifos(anuncio.txt, x + d, y, anuncio.cor, tam);
+      desenhaGlifos(anuncio.txt, x, y - d, anuncio.cor, tam);
+      desenhaGlifos(anuncio.txt, x, y + d, anuncio.cor, tam);
+    }
   }
   ctx.globalAlpha = a;
-  texto(anuncio.txt, x, y, anuncio.cor, tam);
+  if (anuncio.iris) {
+    // contorno primeiro, depois as letras coloridas por cima
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        if (dx || dy) desenhaGlifos(anuncio.txt, x + dx * tam, y + dy * tam, COR.vazio, tam);
+    glifosIris(anuncio.txt, x, y, tam, desloc);
+  } else {
+    texto(anuncio.txt, x, y, anuncio.cor, tam);
+  }
   ctx.globalAlpha = 1;
 }
 
