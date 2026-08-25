@@ -42,8 +42,11 @@ const CFG = {
   NIVEL_MAX: 16,         // teto de TAMANHO, não de vitória: sem isso ele
                          // engoliria a tela. 300 estrelas caem por volta do
                          // nível 15, então o teto quase nunca é encostado
-  RAIO_BASE: 12,         // raio APARENTE (na tela) no nível 0 — tem que caber a carinha
-  RAIO_TELA_PASSO: 1.4,  // quanto o raio aparente cresce por nível
+  /* Começa maior: em raio 12 o rosto caía no segundo menor jogo de sprites
+     e o personagem ficava tosco. Em 17 ele já nasce no terceiro, com olhos,
+     bochecha e boca desenhados com folga. */
+  RAIO_BASE: 17,         // raio APARENTE (na tela) no nível 0
+  RAIO_TELA_PASSO: 1.6,  // quanto o raio aparente cresce por nível
 
   /* universo em expansão */
   /* A câmera abre PROGRESSIVAMENTE: cada nível revela mais campo que o
@@ -51,12 +54,15 @@ const CFG = {
      cresce como (1 + n*PASSO + n²*CURVA) — o termo quadrático é o que faz
      cada nível render mais que o de antes. Com a fórmula linear antiga, a
      abertura ia diminuindo em campo visto conforme o zoom caía. */
-  ZOOM_PASSO: 0.026,     // abertura por nível
-  ZOOM_CURVA: 0.0027,    // e o quanto essa abertura acelera
-  ZOOM_MIN: 0.5,         // afastamento máximo
+  ZOOM_PASSO: 0.032,     // abertura por nível
+  ZOOM_CURVA: 0.004,     // e o quanto essa abertura acelera
+  ZOOM_MIN: 0.4,         // afastamento máximo
   ZOOM_ESTOURO: 0.075,   // o quanto a câmera passa do ponto ao subir de nível
   ZOOM_FREIO: 0.9,       // com que rapidez esse estouro assenta
-  MUNDO_MULT: 2.4,       // o mundo tem esta vez o tamanho do que a câmera vê
+  MUNDO_MULT: 2.2,       // o mundo tem esta vez o tamanho do que a câmera vê.
+                         // Caiu de 2,4 para compensar o zoom mais aberto: o
+                         // mundo é gerado no tamanho TOTALMENTE expandido, e
+                         // ele multiplica a memória das nebulosas
 
   /* movimento (em pixels de TELA por quadro: o mundo já compensa o zoom) */
   ACEL: 0.34,
@@ -65,7 +71,11 @@ const CFG = {
   VEL_PERDA: 0.025,       // perda de velocidade aparente por nível
 
   /* sucção */
-  ALCANCE_SUCCAO: 3.6,   // raio de atração, em múltiplos do raio do buraco
+  /* Caiu de 3,6 ao mesmo tempo em que o personagem cresceu. O alcance é
+     MÚLTIPLO do raio, então um boneco maior multiplica a área de coleta
+     sozinho. Medido em 4 partidas de cada: com 3,6 a partida caía para 54 s
+     (era 84 s); com 2,9 fica em 74 s, perto do ritmo de antes. */
+  ALCANCE_SUCCAO: 2.9,   // raio de atração, em múltiplos do raio do buraco
   FORCA_SUCCAO: 0.17,
   GIRO_SUCCAO: 1.2,      // quanto a estrela rodopia enquanto é sugada
 
