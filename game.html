@@ -359,17 +359,22 @@ const COR = CFG.ESCURO ? PALETAS.escuro : PALETAS.claro;
 
    Os painéis e as bordas de barra vão junto porque são chapadas claras: sobre
    preto elas viravam manchas brancas maiores que qualquer personagem. */
+/* A escada da nuvem foi refeita com os DOIS primeiros degraus quase colados
+   no céu e um salto forte só no fim. Antes ela subia parelha do preto ao
+   branco e os degraus do meio — cinzas médios — cobriam boa parte da nuvem;
+   era isso que sujava a tela, porque cinza médio não é nem vazio nem gás.
+   Agora a franja some no escuro e o miolo acende de verdade.
+   O tom não é cinza puro: um leve violeta dá a saturação que o preto absoluto
+   não tem, e ainda assim o cenário continua sem competir com as cores do jogo. */
+const NUVEM_PB = ["#040309","#070513","#0e0a22","#1d1547","#463490","#cfc4f0"];
 const FUNDO_PB = {
-  vazio:  "#06040d",
-  nebs: [["#0f0d16","#1b1826","#2f2a3d","#514a63","#867e9a","#d6d0e4"],
-         ["#0f0d16","#1b1826","#2f2a3d","#514a63","#867e9a","#d6d0e4"],
-         ["#0f0d16","#1b1826","#2f2a3d","#514a63","#867e9a","#d6d0e4"],
-         ["#0f0d16","#1b1826","#2f2a3d","#514a63","#867e9a","#d6d0e4"]],
-  poeira: ["#1a1626","#221d31","#2b2540"],
+  vazio:  "#020207",
+  nebs: [NUVEM_PB, NUVEM_PB, NUVEM_PB, NUVEM_PB],
+  poeira: ["#0c0a16","#110e1e","#171328"],
   estrela: "#ffffff",
-  estrelaSuave: "#a79cba",
-  painel: "#161020",
-  borda:  "#2b2438",
+  estrelaSuave: "#9c90b8",
+  painel: "#0c0818",
+  borda:  "#241d33",
   hudFraco: "#8a7c9c"
 };
 /* guarda o que estava valendo, para conseguir voltar */
@@ -2299,7 +2304,7 @@ function passo() {
         if (outro.imune > 0) escudou(outro, outro.x, outro.y);
         else if (outro.comidas > 0) arrancarEstrela(p, outro);
       }
-      if (quadro % 3 === 0) fioRoxo(p, outro);
+      if (quadro % 2 === 0) fioRoxo(p, outro);
     } else {
       p.ritmoDreno = Math.min(p.ritmoDreno, 20);   // saiu de vista, quase reinicia
     }
@@ -2632,8 +2637,17 @@ function atirarBloco(de, alvo) {
   const r = de === buraco ? raioMundo() : raioMundoNivel(de.nivel);
   blocos.push({ x: de.x + Math.cos(a) * r, y: de.y + Math.sin(a) * r,
                 vx: Math.cos(a) * v, vy: Math.sin(a) * v,
-                giro: Math.random() * Math.PI, vida: 200, alvo: alvo });
+                giro: Math.random() * Math.PI, vida: 200, alvo: alvo, rastro: [] });
   de.pulso = Math.max(de.pulso, 0.5);
+  // fumacinha na boca do cano, para o disparo ter origem visível
+  for (let k = 0; k < 8; k++) {
+    const b = a + (Math.random() - 0.5) * 1.1, w = (0.5 + Math.random()) / zoom;
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.06,
+                   x: de.x + Math.cos(a) * r, y: de.y + Math.sin(a) * r,
+                   vx: Math.cos(b) * w, vy: Math.sin(b) * w,
+                   vida: 10 + Math.floor(Math.random() * 8), arrasto: 0.92,
+                   tipo: "enjoo", cor: COR.bloco[Math.floor(Math.random() * 3)] });
+  }
 }
 
 function passoBlocos(L) {
@@ -2650,6 +2664,10 @@ function passoBlocos(L) {
     const ang = atual + limitar(dif, -CFG.SATURNO_MIRA, CFG.SATURNO_MIRA);
     const v = Math.hypot(g.vx, g.vy);
     g.vx = Math.cos(ang) * v; g.vy = Math.sin(ang) * v;
+    if (g.rastro) {
+      g.rastro.unshift({ x: g.x, y: g.y });
+      if (g.rastro.length > 6) g.rastro.pop();
+    }
     g.x += g.vx; g.y += g.vy;
     g.giro += 0.14;
     g.vida--;
@@ -2666,8 +2684,9 @@ function passoBlocos(L) {
       // levar tiro sacode mais do que acertar: o baque é de quem apanha
       tremor = Math.max(tremor, vitima === buraco ? 14 : 6);
       if (vitima === buraco) aberr = Math.max(aberr, Math.round(CFG.ABERRACAO * 0.5));
-      faiscar(g.x, g.y, 10, 2, 6);
-      for (let k = 0; k < 10; k++) {
+      faiscar(g.x, g.y, 14, 2, 6);
+      aneis.push({ x: g.x, y: g.y, r: 3, vida: 12, total: 12, rival: false });
+      for (let k = 0; k < 22; k++) {
         const a = Math.random() * Math.PI * 2, s2 = (0.5 + Math.random()) / zoom;
         faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: g.x, y: g.y, vx: Math.cos(a) * s2, vy: Math.sin(a) * s2,
                        vida: 12 + Math.floor(Math.random() * 10), arrasto: 0.94,
@@ -2716,16 +2735,22 @@ function arrancarEstrela(de, vitima) {
   roubadas.push({
     x0: vitima.x + Math.cos(a) * rr * 0.8, y0: vitima.y + Math.sin(a) * rr * 0.8,
     para: de,
-    x: 0, y: 0, t: 0, giro: Math.random() * Math.PI,
+    x: 0, y: 0, t: 0, giro: Math.random() * Math.PI, rastro: [],
     // a curva sai por um lado: em linha reta as três por segundo viram um fio só
     curva: (Math.random() < 0.5 ? -1 : 1) * (0.2 + Math.random() * 0.3),
     passo: 1 / (22 + Math.floor(Math.random() * 10))
   });
-  for (let k = 0; k < 8; k++) {
-    const b = Math.random() * Math.PI * 2, v = (0.5 + Math.random()) / zoom;
-    faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: vitima.x, y: vitima.y, vx: Math.cos(b) * v, vy: Math.sin(b) * v,
-                   vida: 12 + Math.floor(Math.random() * 8), arrasto: 0.95, tipo: "raio",
-                   cor: COR.jupiter[2 + Math.floor(Math.random() * 3)] });
+  // espiral saindo da vítima: as partículas nascem na borda e giram para
+  // fora, o oposto do ímã. É a leitura de "está sendo arrancado daqui"
+  for (let k = 0; k < 18; k++) {
+    const b = (k / 18) * Math.PI * 2 + Math.random() * 0.3;
+    const v = (0.7 + Math.random() * 0.9) / zoom;
+    faiscas.push({ curva: 0.07,
+                   x: vitima.x + Math.cos(b) * rr * 0.7,
+                   y: vitima.y + Math.sin(b) * rr * 0.7,
+                   vx: Math.cos(b) * v, vy: Math.sin(b) * v,
+                   vida: 14 + Math.floor(Math.random() * 10), arrasto: 0.95, tipo: "raio",
+                   cor: COR.jupiter[1 + Math.floor(Math.random() * 4)] });
   }
 }
 
@@ -2734,6 +2759,10 @@ function passoRoubadas() {
     const e = roubadas[i];
     e.t += e.passo;
     e.giro += 0.2;
+    if (e.t > 0) {
+      e.rastro.unshift({ x: e.x, y: e.y });
+      if (e.rastro.length > 7) e.rastro.pop();
+    }
     const p = e.para;
     if (e.t >= 1) {
       // chegou: agora sim o ponto entra, com o mesmo estalo de engolir estrela
@@ -2803,18 +2832,28 @@ function engolirJupiter(dono) {
 
 /* fio de partículas correndo do rival para o buraco: é o que mostra de onde
    a estrela está saindo, sem precisar de texto */
+/* O cordão do dreno. Antes era uma partícula solta por vez seguindo a reta
+   entre os dois, e sumia no meio do resto. Agora saem várias por chamada e
+   elas nascem AFASTADAS DA RETA, num deslocamento que gira com o tempo — o
+   conjunto vira um cordão trançado em vez de um risco, e é o trançado que faz
+   enxergar de longe que existe uma ligação entre os dois personagens. */
 function fioRoxo(de, vitima) {
-  const t = Math.random();
-  const x = vitima.x + (de.x - vitima.x) * t;
-  const y = vitima.y + (de.y - vitima.y) * t;
   const dx = de.x - vitima.x, dy = de.y - vitima.y;
   const m = Math.hypot(dx, dy) || 1;
-  const v = (1.2 + Math.random()) / zoom;
-  faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: x + (Math.random() - 0.5) * 6 / zoom,
-                 y: y + (Math.random() - 0.5) * 6 / zoom,
-                 vx: dx / m * v, vy: dy / m * v,
-                 vida: 10 + Math.floor(Math.random() * 8), arrasto: 0.98, tipo: "raio",
-                 cor: COR.jupiter[2 + Math.floor(Math.random() * 3)] });
+  const nx = -dy / m, ny = dx / m;               // perpendicular à ligação
+  for (let k = 0; k < 3; k++) {
+    const t = Math.random();
+    const fase = t * 9 + quadro * 0.25 + k * 2.1;
+    const lado = Math.sin(fase) * (5 + 5 * Math.sin(t * Math.PI)) / zoom;
+    const x = vitima.x + dx * t + nx * lado;
+    const y = vitima.y + dy * t + ny * lado;
+    const v = (1.3 + Math.random() * 1.2) / zoom;
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.04,
+                   x: x, y: y,
+                   vx: dx / m * v, vy: dy / m * v,
+                   vida: 9 + Math.floor(Math.random() * 8), arrasto: 0.98, tipo: "raio",
+                   cor: COR.jupiter[1 + Math.floor(Math.random() * 4)] });
+  }
 }
 
 /* poeira vermelha correndo PARA DENTRO do buraco: o ímã puxa, então as
@@ -3075,20 +3114,38 @@ function desenharMundo() {
   /* as estrelas roubadas, a caminho: giram e deixam rastro roxo */
   for (const e of roubadas) {
     const ex = paraTelaX(e.x), ey = paraTelaY(e.y);
-    ctx.globalAlpha = 0.45;
-    disco(ex, ey, 3, COR.jupiter[3]);
-    ctx.globalAlpha = 1;
+    if (e.rastro) {                              // deixa risco por onde passou
+      for (let k = e.rastro.length - 1; k >= 0; k--) {
+        const t = 1 - k / e.rastro.length;
+        ctx.globalAlpha = t * 0.5;
+        px(paraTelaX(e.rastro[k].x), paraTelaY(e.rastro[k].y), COR.jupiter[3]);
+        if (t > 0.5) px(paraTelaX(e.rastro[k].x) + 1, paraTelaY(e.rastro[k].y), COR.jupiter[2]);
+      }
+      ctx.globalAlpha = 1;
+    }
+    brilho(ex, ey, 1, 6, COR.roxo, 0.4, 2);
     const spr = ESTRELAS_SPR[e.giro % 1.6 < 0.8 ? 1 : 2];
     carimbo(spr, ex, ey, COR.estrela);
     px(ex, ey, COR.jupiter[1]);
   }
 
-  /* os blocos de gelo a caminho do rival */
+  /* os blocos de gelo a caminho do alvo */
   for (const g of blocos) {
     const gx = paraTelaX(g.x), gy = paraTelaY(g.y);
-    ctx.globalAlpha = 0.35;
-    disco(gx, gy, CFG.SATURNO_RAIO_BLOCO + 2, COR.bloco[1]);
-    ctx.globalAlpha = 1;
+    // rastro: as posições por onde passou, apagando. Sem ele o bloco some no
+    // meio das estrelas e ninguém vê que tem coisa vindo
+    if (g.rastro) {
+      for (let k = g.rastro.length - 1; k >= 0; k--) {
+        const t = 1 - k / g.rastro.length;
+        ctx.globalAlpha = t * 0.5;
+        disco(paraTelaX(g.rastro[k].x), paraTelaY(g.rastro[k].y),
+              CFG.SATURNO_RAIO_BLOCO * t * 0.8, COR.bloco[1]);
+      }
+      ctx.globalAlpha = 1;
+    }
+    const pul = 0.5 + 0.5 * Math.sin(quadro * 0.3 + g.giro);
+    brilho(gx, gy, CFG.SATURNO_RAIO_BLOCO,
+           CFG.SATURNO_RAIO_BLOCO + 5 + pul * 2, COR.bloco[2], 0.3 + pul * 0.2, 2);
     // quadradinho girando: bloco de gelo, não bolinha
     const c1 = Math.cos(g.giro), s1 = Math.sin(g.giro);
     const L2 = CFG.SATURNO_RAIO_BLOCO;
@@ -3170,6 +3227,20 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   ctx.globalAlpha = 0.4;                        // halo macio
   oval(bx, by, rx + 5, ry + 5, halo);
   ctx.globalAlpha = 1;
+
+  /* Quem está com um poder de ataque ganha um anel pulsando fora do disco.
+     Com quatro personagens, cinco planetas, cometa e cadente na tela, não dava
+     para saber quem estava perigoso — a barrinha só existe para você, e os
+     rivais não tinham marca nenhuma. */
+  if (p.tiro > 0 || p.dreno > 0) {
+    const pul = 0.5 + 0.5 * Math.sin(quadro * 0.22);
+    const cor = p.tiro > 0 ? COR.saturno[3] : COR.roxo;
+    ctx.globalAlpha = 0.35 + pul * 0.4;
+    anel(bx, by, r + 5 + pul * 2, 1.4, cor);
+    ctx.globalAlpha = 0.2 + pul * 0.2;
+    anel(bx, by, r + 8 + pul * 3, 1.2, cor);
+    ctx.globalAlpha = 1;
+  }
 
   // invencível: o anel roda em arco-íris, com um halo largo e macio por baixo.
   // O "blur" aqui são anéis concêntricos de alfa baixo — desenhar borrado de
@@ -3963,18 +4034,24 @@ function botaoFundo() {
   return { x: Math.round(VL / 2) + 9, y: b0.y + b0.a + 10, l: 13, a: 11 };
 }
 
-/* Ícone do fundo: um círculo com metade cheia. É o símbolo mais direto de
-   "troca de contraste", e não precisa de legenda. */
+/* Ícone do fundo: lua minguante com duas estrelinhas. O meio-círculo que
+   havia aqui era ambíguo — lia como "meio cheio" tanto quanto como contraste.
+   Lua e estrela não deixam dúvida do que o botão faz. */
+const ICONE_LUA = [
+  "..###..",
+  ".##....",
+  "##.....",
+  "##.....",
+  "##.....",
+  ".##....",
+  "..###.."
+];
 function desenharIconeFundo(x, y, pb) {
   const c = pb ? COR.disco[5] : COR.hudFraco;
-  const cx = x + 6, cy = y + 5, r = 5;
-  anel(cx, cy, r, 1.2, c);
-  ctx.fillStyle = c;
-  for (let dy = -r + 1; dy <= r - 1; dy++) {
-    const w = Math.floor(Math.sqrt(Math.max(0, (r - 1) * (r - 1) - dy * dy)));
-    if (w <= 0) continue;
-    ctx.fillRect(cx, cy + dy, w + 1, 1);          // só a metade da direita
-  }
+  carimbo(ICONE_LUA, x + 4, y + 5, c);
+  px(x + 9, y + 2, c);                           // estrelinhas ao lado
+  px(x + 8, y + 3, c); px(x + 10, y + 3, c); px(x + 9, y + 4, c);
+  px(x + 11, y + 7, c);
 }
 
 /* Caixinha de som como SPRITE, do jeito que o resto do jogo desenha coisa
@@ -4046,7 +4123,13 @@ function desenharMenu() {
           escolhido ? cor : COR.hudFraco, 1);
   }
 
-  /* som e fundo, lado a lado */
+  /* som e fundo, lado a lado. Vão sobre uma placa escura porque os bonecos
+     ficam passeando pelo menu e passavam bem por baixo dos ícones */
+  const bsr = botaoSom(), bfr = botaoFundo();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = COR.painel;
+  ctx.fillRect(bsr.x - 4, bsr.y - 3, (bfr.x + bfr.l) - bsr.x + 8, bsr.a + 6);
+  ctx.globalAlpha = 1;
   const bs = comprimir(botaoSom(), "som");
   desenharIconeSom(bs.x, bs.y, SOM.ligado);
   const bf = comprimir(botaoFundo(), "fundo");
