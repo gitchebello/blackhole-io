@@ -38,7 +38,10 @@ const CFG = {
   /* crescimento */
   CUSTO_BASE: 5,         // estrelas para sair do nível 0
   CUSTO_PASSO: 2,        // cada nível custa isso a mais que o anterior
-  NIVEL_MAX: 12,         // teto: sem isso ele engoliria a tela inteira
+  META: 300,             // quem chegar a 300 estrelas primeiro vence
+  NIVEL_MAX: 16,         // teto de TAMANHO, não de vitória: sem isso ele
+                         // engoliria a tela. 300 estrelas caem por volta do
+                         // nível 15, então o teto quase nunca é encostado
   RAIO_BASE: 12,         // raio APARENTE (na tela) no nível 0 — tem que caber a carinha
   RAIO_TELA_PASSO: 1.4,  // quanto o raio aparente cresce por nível
 
@@ -81,9 +84,21 @@ const CFG = {
   SATURNO_VEL: 2.8,      // velocidade do bloco, em pixels de tela
   SATURNO_MIRA: 0.022,   // correção de rumo por quadro: persegue de leve.
                          // Em 0,055 o bloco virava teleguiado e acertava 90%
-  SATURNO_ALCANCE: 1.6,  // em telas de distância: longe demais não atira
+  SATURNO_FOLGA: 6,      // margem, em pixels de tela, para o rival contar
+                         // como "na tela" na hora de atirar
   SATURNO_RAIO_BLOCO: 3,
   SATURNO_CLARAO: 24,
+
+  /* Júpiter — o gigante roxo: rouba estrelas de perto */
+  JUPITER_RAIO: 7,
+  JUPITER_ESPERA: 600,   // mesma frequência dos outros planetas
+  JUPITER_DRENO: 600,    // duração do poder (600 = 10s)
+  JUPITER_RITMO: 60,     // 1 estrela por segundo
+  JUPITER_ALCANCE: 3.2,  // raio de roubo, em múltiplos do raio do buraco.
+                         // Tem que ficar bem além do encostão, senão o jogador
+                         // precisa arriscar a trombada para usar o poder
+  JUPITER_ONDA: 1.6,     // amplitude da ondulação durante o efeito
+  JUPITER_CLARAO: 26,
 
   NEBULOSAS: 10,          // nuvens de gás espalhadas pelo mapa; o resto é vácuo
 
@@ -135,6 +150,12 @@ const CFG = {
 
   /* controle */
   ZONA_MORTA: 4,
+  /* modo sucção: rodar o dedo em círculo acelera a rotação do buraco */
+  ESPIRAL_MIN: 0.7,      // giro acumulado onde o modo começa a valer
+  ESPIRAL_MAX: 2,        // e onde chega no máximo (~1,3 volta por segundo)
+  ESPIRAL_ALCANCE: 1.1,  // quanto o alcance de sucção estica no máximo
+  ESPIRAL_FORCA: 1.6,    // e quanto o puxão fica mais firme
+  ESPIRAL_PLANETA: 0.5,  // com que força os planetas vêm junto
   RAIO_ANALOG: 22,
   SEMENTE: 20260823
 };
@@ -169,6 +190,11 @@ const COR = {
   saturno: ["#fffdf0","#fff4cf","#ffe9a8","#f2d074","#d4ac4a","#a8842f"],
   bloco:   ["#f2fcff","#cdeefb","#a2daf2","#74bfe0"],
   glowSaturno:"#e8b53a",     // dourado, não amarelo pastel: o corpo já é claro
+  jupiter: ["#f6efff","#e6d6f7","#cdb2ee","#ac8ade","#8a63c6","#6a45a0"],
+  fumaca:  "#d8c2f2",        // a nuvem roxo-claro em volta
+  roxo:    "#9a6fd4",
+  roxoClarao:"#e6d6f7",
+  glowJupiter:"#8a63c6",
   marte:  ["#f4b98a","#e8875a","#d1603c","#a8422a"],
   ima:    "#e8734a",
   imaClarao:"#ffd0b8",
@@ -669,6 +695,51 @@ function desenharSpriteSaturno() {
 }
 desenharSpriteSaturno();
 
+/* ── sprite de Júpiter: faixas roxas e a mancha ──────────────
+   O que identifica Júpiter de longe são as listras horizontais e a mancha
+   oval. As listras aqui são função só de dy, então ficam retas e paralelas;
+   é o que separa a leitura dele da de Marte, cujas faixas ondulam. */
+const JUP_D = CFG.JUPITER_RAIO * 2 + 1;
+const JUP_QUADROS = 8;
+const jupiterSprite = document.createElement("canvas");
+jupiterSprite.width = JUP_D * JUP_QUADROS; jupiterSprite.height = JUP_D;
+
+function desenharSpriteJupiter() {
+  const fx = jupiterSprite.getContext("2d");
+  const R = CFG.JUPITER_RAIO, c = R;
+  const J = COR.jupiter;
+
+  for (let q = 0; q < JUP_QUADROS; q++) {
+    const giro = q * (Math.PI * 2 / JUP_QUADROS);
+    for (let y = 0; y < JUP_D; y++) {
+      const dy = y - c;
+      const w = meiaLinha(R, dy);
+      if (w < 0) continue;
+      for (let x = c - w; x <= c + w; x++) {
+        const dx = x - c;
+        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
+        let cor;
+        if (x === c - w || x === c + w) {
+          cor = J[5];
+        } else {
+          const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
+          const listra = Math.sin(dy * 1.9) * 0.5 + 0.5;
+          const t = limitar(luz * 0.55 + listra * 0.45, 0, 0.999);
+          cor = J[Math.min(4, Math.floor((1 - t) * 5.2))];
+          // a mancha: uma oval que dá a volta com o planeta
+          const ml = lon + giro;
+          const dml = Math.atan2(Math.sin(ml - 1.1), Math.cos(ml - 1.1));
+          if (Math.abs(dml) < 0.55 && Math.abs(dy - R * 0.22) < R * 0.28)
+            cor = luz > 0.5 ? J[1] : J[2];
+        }
+        fx.fillStyle = cor;
+        fx.fillRect(q * JUP_D + x, y, 1, 1);
+      }
+    }
+  }
+}
+desenharSpriteJupiter();
+
 /* ── desenho em pixel cheio (sem antialias) ──────────────────── */
 function disco(cx, cy, raio, cor) {
   ctx.fillStyle = cor;
@@ -854,6 +925,7 @@ let vencedor = null;
 let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, esperaTerra = 0, turbo = 0;
 let marte = null, esperaMarte = 0, ima = 0, flashIma = 0;
 let saturno = null, esperaSaturno = 0, tiro = 0, recargaTiro = 0, flashTiro = 0, blocos = [];
+let jupiter = null, esperaJupiter = 0, dreno = 0, ritmoDreno = 0, flashRoxo = 0, drenando = false;
 let anuncio = null;
 let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, arco = 0, quadro = 0;
 let esperaColisao = 0, cadente = null, esperaCadente = 0;
@@ -952,6 +1024,20 @@ function novoSaturno() {
   return null;
 }
 
+function novoJupiter() {
+  const L = limites();
+  for (let tent = 0; tent < 40; tent++) {
+    const t = {
+      x: L.x0 + 20 + rnd() * (L.l - 40),
+      y: L.y0 + 20 + rnd() * (L.a - 40),
+      vx: (rnd() - 0.5) * 0.1, vy: (rnd() - 0.5) * 0.1,
+      quadro: 0
+    };
+    if (Math.hypot(t.x - buraco.x, t.y - buraco.y) > visaoL() * 0.35) return t;
+  }
+  return null;
+}
+
 function reiniciar() {
   buraco.nivel = 0; buraco.comidas = 0; buraco.progresso = 0;
   raioTela = CFG.RAIO_BASE; zoom = zoomAlvo = 1;
@@ -978,6 +1064,8 @@ function reiniciar() {
   marte = null; esperaMarte = CFG.MARTE_ESPERA; ima = 0; flashIma = 0;
   saturno = null; esperaSaturno = CFG.SATURNO_ESPERA;
   tiro = 0; recargaTiro = 0; flashTiro = 0; blocos = [];
+  jupiter = null; esperaJupiter = CFG.JUPITER_ESPERA;
+  dreno = 0; ritmoDreno = 0; flashRoxo = 0; drenando = false;
   anuncio = null;
   cam.x = buraco.x - visaoL() / 2;
   cam.y = buraco.y - visaoA() / 2;
@@ -985,11 +1073,14 @@ function reiniciar() {
 reiniciar();
 
 /* ── controle ────────────────────────────────────────────────── */
-const toque = { ativo: false, ax: 0, ay: 0, x: 0, y: 0, id: null };
+const toque = { ativo: false, ax: 0, ay: 0, x: 0, y: 0, id: null,
+                ang: null, volta: 0, sentido: 0 };
+let espiral = 0;          // 0 a 1: o quanto o gesto de espiral está valendo
 const teclas = Object.create(null);
 
 function jogar() { reiniciar(); cena = "jogo"; }
-function sair()  { toque.ativo = false; toque.id = null; cena = "menu"; reiniciar(); }
+function sair()  { toque.ativo = false; toque.id = null; toque.ang = null;
+                   toque.volta = 0; espiral = 0; cena = "menu"; reiniciar(); }
 
 tela.addEventListener("pointerdown", e => {
   e.preventDefault();
@@ -1037,6 +1128,30 @@ window.addEventListener("keydown", e => {
 window.addEventListener("keyup", e => { teclas[e.key] = false; });
 
 /* ── lógica ──────────────────────────────────────────────────── */
+/* Mede o quanto o dedo está girando em torno do ponto onde encostou.
+   Acumula o |dθ| com decaimento: o valor de regime é proporcional à
+   VELOCIDADE do giro, não ao total girado — assim parar de rodar desliga o
+   modo em meio segundo, em vez de deixar um saldo pendurado. */
+function lerEspiral() {
+  if (!toque.ativo) { toque.ang = null; toque.volta = 0; espiral = 0; return; }
+  const dx = toque.x - toque.ax, dy = toque.y - toque.ay;
+  if (Math.hypot(dx, dy) < CFG.ZONA_MORTA * 2) {   // perto demais, o ângulo pula
+    toque.ang = null; toque.volta *= 0.9;
+  } else {
+    const a = Math.atan2(dy, dx);
+    if (toque.ang !== null) {
+      let d = a - toque.ang;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      toque.volta = toque.volta * 0.94 + Math.abs(d);
+      toque.sentido = toque.sentido * 0.9 + Math.sign(d) * 0.1;
+    }
+    toque.ang = a;
+  }
+  espiral = limitar((toque.volta - CFG.ESPIRAL_MIN) /
+                    (CFG.ESPIRAL_MAX - CFG.ESPIRAL_MIN), 0, 1);
+}
+
 function velMaxTela() {
   const base = Math.max(0.9, CFG.VEL_MAX - buraco.nivel * CFG.VEL_PERDA);
   const gelado = buraco.enjoo > 0 ? CFG.COMETA_FREIO : 1;
@@ -1050,7 +1165,8 @@ function passoRival(L) {
   const zr = zoomDoNivel(rival.nivel);
 
   const vivo = rival.alvo && (rival.alvo === terra || rival.alvo === marte ||
-                              rival.alvo === saturno || estrelas.indexOf(rival.alvo) >= 0);
+                              rival.alvo === saturno || rival.alvo === jupiter ||
+                              estrelas.indexOf(rival.alvo) >= 0);
   if (--rival.pensar <= 0 || !vivo) {
     rival.pensar = CFG.RIVAL_PENSAR + Math.floor(Math.random() * CFG.RIVAL_PENSAR);
     let melhor = null, md = Infinity;
@@ -1061,6 +1177,7 @@ function passoRival(L) {
     if (terra && Math.hypot(terra.x - rival.x, terra.y - rival.y) < md * 1.3) melhor = terra;
     if (marte && Math.hypot(marte.x - rival.x, marte.y - rival.y) < md * 1.3) melhor = marte;
     if (saturno && Math.hypot(saturno.x - rival.x, saturno.y - rival.y) < md * 1.3) melhor = saturno;
+    if (jupiter && Math.hypot(jupiter.x - rival.x, jupiter.y - rival.y) < md * 1.3) melhor = jupiter;
     rival.alvo = melhor;
   }
   if (rival.alvo) {
@@ -1296,6 +1413,11 @@ function passo() {
       if (Math.hypot(dx, dy) > CFG.ZONA_MORTA) buraco.ang = Math.atan2(dy, dx);
       acelerando = true;
     }
+    lerEspiral();
+    // rodando o dedo, ele não sai andando: o gesto vira rotação, não empurrão.
+    // Sem isso o buraco descreveria círculos junto com o dedo e o modo sucção
+    // ficaria impossível de usar parado, que é o ponto dele
+    if (espiral > 0.15) acelerando = false;
     let tx = 0, ty = 0;
     if (teclas.ArrowLeft  || teclas.a || teclas.A) tx -= 1;
     if (teclas.ArrowRight || teclas.d || teclas.D) tx += 1;
@@ -1349,9 +1471,11 @@ function passo() {
     { quem: rival,  x: rival.x,  y: rival.y,  rm: raioMundoNivel(rival.nivel) }
   ];
   // o ímã de Marte estica só o alcance do jogador, e por pouco tempo:
-  // esticar demais faria as estrelas virem sozinhas e tirava a graça de mirar
+  // esticar demais faria as estrelas virem sozinhas e tirava a graça de mirar.
+  // O gesto de espiral soma por cima, enquanto o dedo estiver rodando
   sugadores[0].alc = sugadores[0].rm * CFG.ALCANCE_SUCCAO *
-                     (ima > 0 ? CFG.MARTE_ALCANCE : 1);
+                     (ima > 0 ? CFG.MARTE_ALCANCE : 1) *
+                     (1 + espiral * CFG.ESPIRAL_ALCANCE);
   sugadores[1].alc = sugadores[1].rm * CFG.ALCANCE_SUCCAO;
 
   for (let i = estrelas.length - 1; i >= 0; i--) {
@@ -1369,7 +1493,8 @@ function passo() {
       e.presa = true;
       e.sx = dono.x; e.sy = dono.y; e.salc = dono.alc;
       const dx = dono.x - e.x, dy = dono.y - e.y, d = dDono;
-      const puxao = dono.quem === buraco && ima > 0 ? CFG.MARTE_FORCA : 1;
+      let puxao = dono.quem === buraco && ima > 0 ? CFG.MARTE_FORCA : 1;
+      if (dono.quem === buraco) puxao *= 1 + espiral * CFG.ESPIRAL_FORCA;
       const forca = (CFG.FORCA_SUCCAO * puxao * (1 - melhor) + 0.02) / zoom;
       e.vx += (dx / d) * forca; e.vy += (dy / d) * forca;
       // gira a estrela em torno do sugador: o mergulho vira espiral.
@@ -1441,17 +1566,58 @@ function passo() {
     saturno = novoSaturno();
   }
 
+  /* — Júpiter — */
+  if (jupiter) {
+    jupiter.quadro++;
+    jupiter.x += jupiter.vx / zoom; jupiter.y += jupiter.vy / zoom;
+    const rj = CFG.JUPITER_RAIO / zoom;
+    if (jupiter.x < L.x0 + rj || jupiter.x > L.x1 - rj) jupiter.vx *= -1;
+    if (jupiter.y < L.y0 + rj || jupiter.y > L.y1 - rj) jupiter.vy *= -1;
+    jupiter.x = limitar(jupiter.x, L.x0 + rj, L.x1 - rj);
+    jupiter.y = limitar(jupiter.y, L.y0 + rj, L.y1 - rj);
+    if (Math.hypot(jupiter.x - buraco.x, jupiter.y - buraco.y) < raioMundo() + rj * 0.4)
+      engolirJupiter(buraco);
+    else if (Math.hypot(jupiter.x - rival.x, jupiter.y - rival.y) < raioMundoNivel(rival.nivel) + rj * 0.4)
+      engolirJupiter(rival);
+  } else if (--esperaJupiter <= 0) {
+    jupiter = novoJupiter();
+  }
+
+  /* — o roubo de estrelas, enquanto o poder dura — */
+  drenando = false;
+  if (dreno > 0) {
+    dreno--;
+    const d = Math.hypot(rival.x - buraco.x, rival.y - buraco.y);
+    if (d < alcanceDreno()) {
+      drenando = true;
+      if (--ritmoDreno <= 0) {
+        ritmoDreno = CFG.JUPITER_RITMO;
+        if (rival.comidas > 0) {
+          perderEstrelas(rival, 1);
+          ganharEstrelas(buraco, 1);
+          rival.pulso = 1; rival.surpresa = Math.max(rival.surpresa, 16);
+          tremor = Math.max(tremor, 5);
+          flashRoxo = Math.max(flashRoxo, 16);
+        }
+      }
+      if (quadro % 2 === 0) fioRoxo();
+    } else {
+      ritmoDreno = Math.min(ritmoDreno, 20);    // sai do raio, quase reinicia
+    }
+  }
+
   /* — a torre de gelo atira enquanto o poder dura — */
   if (tiro > 0) {
     tiro--;
     if (recargaTiro > 0) recargaTiro--;
-    const d = Math.hypot(rival.x - buraco.x, rival.y - buraco.y);
-    // só atira com o rival a uma distância que faça sentido: mirar do outro
-    // lado do mapa daria bloco viajando meio minuto até chegar
-    if (recargaTiro <= 0 && d < visaoL() * CFG.SATURNO_ALCANCE) atirarBloco();
+    // só atira com o rival VISÍVEL na câmera. O limite antes era uma distância
+    // em unidades de mundo, que no zoom afastado deixava mirar em quem estava
+    // fora da tela — o bloco saía para o nada
+    if (recargaTiro <= 0 && naTela(rival.x, rival.y, -CFG.SATURNO_FOLGA)) atirarBloco();
   }
   passoBlocos(L);
 
+  if (espiral > 0.02) puxarPlanetas();
   passoParticulas();
 
   /* — câmera — */
@@ -1491,6 +1657,9 @@ function passoParticulas() {
   if (flashTerra > 0) flashTerra--;
   if (flashIma > 0) flashIma--;
   if (flashTiro > 0) flashTiro--;
+  if (flashRoxo > 0) flashRoxo--;
+  // a tela nunca fica parada durante o efeito: um tremor de fundo baixinho
+  if (dreno > 0) tremor = Math.max(tremor, drenando ? 3.5 : 2);
   if (ima > 0) { ima--; faiscarIma(); if (quadro % 2 === 0) faiscarIma(); }
   if (flashEnjoo > 0) flashEnjoo--;
   if (buraco.surpresa > 0) buraco.surpresa--;
@@ -1551,14 +1720,17 @@ function soltarCoracoes(x, y, quantos, forca, tamMin) {
    cadente. Sobe quantos níveis for preciso. */
 function ganharEstrelas(dono, n) {
   dono.comidas += n;
-  if (dono.nivel >= CFG.NIVEL_MAX) return;
-  dono.progresso += n;
-  while (dono.progresso >= custoDoNivel(dono.nivel)) {
-    dono.progresso -= custoDoNivel(dono.nivel);
-    dono.nivel++;
-    subiuDeNivel(dono);
-    if (dono.nivel >= CFG.NIVEL_MAX) { dono.progresso = 0; terminar(dono); return; }
+  // o nível só governa o tamanho; quem termina a partida é o contador
+  if (dono.nivel < CFG.NIVEL_MAX) {
+    dono.progresso += n;
+    while (dono.nivel < CFG.NIVEL_MAX && dono.progresso >= custoDoNivel(dono.nivel)) {
+      dono.progresso -= custoDoNivel(dono.nivel);
+      dono.nivel++;
+      subiuDeNivel(dono);
+    }
+    if (dono.nivel >= CFG.NIVEL_MAX) dono.progresso = 0;
   }
+  if (dono.comidas >= CFG.META && cena === "jogo") terminar(dono);
 }
 
 function subiuDeNivel(dono) {
@@ -1702,10 +1874,68 @@ function passoBlocos(L) {
       blocos.splice(i, 1);
       continue;
     }
-    const fora = 40 / zoom;
-    if (g.vida <= 0 || g.x < L.x0 - fora || g.x > L.x1 + fora ||
-        g.y < L.y0 - fora || g.y > L.y1 + fora) blocos.splice(i, 1);
+    // e some ao sair de vista: bloco perseguindo fora da tela é dano invisível
+    if (g.vida <= 0 || !naTela(g.x, g.y, 10)) blocos.splice(i, 1);
   }
+}
+
+/* No modo sucção os planetas também são puxados — devagar, porque eles têm
+   massa. É o que faz o gesto valer a pena quando não há estrela por perto. */
+function puxarPlanetas() {
+  const alc = raioMundo() * CFG.ALCANCE_SUCCAO * (1 + espiral * CFG.ESPIRAL_ALCANCE) * 1.4;
+  for (const o of [terra, marte, saturno, jupiter]) {
+    if (!o) continue;
+    const dx = buraco.x - o.x, dy = buraco.y - o.y;
+    const d = Math.hypot(dx, dy) || 0.001;
+    if (d > alc) continue;
+    const f = CFG.ESPIRAL_PLANETA * espiral * (1 - d / alc) * 0.06;
+    o.vx += (dx / d) * f * zoom;                 // vx dos planetas é em tela
+    o.vy += (dy / d) * f * zoom;
+    o.vx *= 0.99; o.vy *= 0.99;
+  }
+}
+
+/* o raio de roubo, em unidades de mundo. Fica bem além do encostão: se o
+   jogador tivesse que colar no rival para roubar, o poder viraria um convite
+   à trombada, que é justamente o que tira estrela dele */
+function alcanceDreno() {
+  return raioMundo() * CFG.JUPITER_ALCANCE + raioMundoNivel(rival.nivel);
+}
+
+function engolirJupiter(dono) {
+  faiscar(jupiter.x, jupiter.y, 18, 2, 8);
+  jupiter = null;
+  esperaJupiter = CFG.JUPITER_ESPERA;
+  if (cena !== "jogo") return;
+  dono.pulso = 1; dono.boca = 20;
+  if (dono !== buraco) return;                  // o rival só engole, como nos outros
+  dreno = CFG.JUPITER_DRENO;
+  ritmoDreno = CFG.JUPITER_RITMO;
+  anunciar("STAR DRAIN!", COR.roxo);
+  tremor = 12;
+  flashRoxo = CFG.JUPITER_CLARAO;
+  for (let k = 0; k < 26; k++) {
+    const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random()) / zoom;
+    faiscas.push({ x: buraco.x, y: buraco.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                   vida: 16 + Math.floor(Math.random() * 12), arrasto: 0.96, tipo: "raio",
+                   cor: COR.jupiter[2 + Math.floor(Math.random() * 3)] });
+  }
+}
+
+/* fio de partículas correndo do rival para o buraco: é o que mostra de onde
+   a estrela está saindo, sem precisar de texto */
+function fioRoxo() {
+  const t = Math.random();
+  const x = rival.x + (buraco.x - rival.x) * t;
+  const y = rival.y + (buraco.y - rival.y) * t;
+  const dx = buraco.x - rival.x, dy = buraco.y - rival.y;
+  const m = Math.hypot(dx, dy) || 1;
+  const v = (1.2 + Math.random()) / zoom;
+  faiscas.push({ x: x + (Math.random() - 0.5) * 6 / zoom,
+                 y: y + (Math.random() - 0.5) * 6 / zoom,
+                 vx: dx / m * v, vy: dy / m * v,
+                 vida: 10 + Math.floor(Math.random() * 8), arrasto: 0.98, tipo: "raio",
+                 cor: COR.jupiter[2 + Math.floor(Math.random() * 3)] });
 }
 
 /* poeira vermelha correndo PARA DENTRO do buraco: o ímã puxa, então as
@@ -1721,24 +1951,39 @@ function faiscarIma() {
                  cor: COR.imaPart[Math.floor(Math.random() * COR.imaPart.length)] });
 }
 
-/* O anel de Saturno em duas metades: a de trás sai antes do corpo, a da
-   frente depois. Sem isso o anel some atrás do planeta ou passa por cima
-   dele inteiro, e nos dois casos a leitura de "planeta com anel" se perde. */
+/* O anel de Saturno, em duas metades: a de trás sai antes do corpo, a da
+   frente depois. Sem isso o anel some atrás do planeta ou passa por cima dele
+   inteiro, e nos dois casos a leitura de "planeta com anel" se perde.
+
+   Ele é desenhado por LINHA, como o resto do jogo, e a inclinação é um
+   cisalhamento (cada linha desliza um tanto para o lado) em vez de uma
+   rotação. Rotacionar quebraria as linhas horizontais e o anel voltaria a
+   sair pontilhado; cisalhando, cada linha continua um traço cheio.
+   Duas faixas com um vão entre elas — a divisão é o que faz parecer anel de
+   Saturno, e não um aro. */
 function anelSaturno(cx, cy, R, frente) {
-  // anel mais contido: com rx=2.05R o conjunto ficava quase o dobro da
-  // largura da Terra e de Marte, e Saturno parecia de outra escala
-  const rx = R * 1.75, ry = R * 0.52;
-  const ci = Math.cos(-0.22), si = Math.sin(-0.22);      // leve inclinação
-  // denso: com poucos passos a elipse sai pontilhada e o anel parece quebrado
-  const passos = Math.max(72, Math.ceil(rx * 11));
-  const faixas = [[1, COR.saturno[3]], [0.88, COR.saturno[2]], [0.76, COR.saturno[4]]];
-  for (let i = 0; i < passos; i++) {
-    const a = (i / passos) * Math.PI * 2;
-    const ca = Math.cos(a), sa = Math.sin(a);
-    if ((sa > 0) !== frente) continue;
-    for (const [k, cor] of faixas) {
-      const ex = ca * rx * k, ey = sa * ry * k;
-      px(cx + ex * ci - ey * si, cy + ex * si + ey * ci, cor);
+  // ry precisa render umas 9 linhas: com 7 as duas faixas e o vão entre elas
+  // não cabem e o anel vira um borrão colado no corpo
+  const rx = R * 2, ry = R * 0.62;
+  const incl = 0.95;                             // cisalhamento por linha
+  const faixas = [[1, 0.82, COR.saturno[4]],     // externa, mais escura
+                  [0.7, 0.46, COR.saturno[2]]];  // interna, clara
+  const topo = Math.ceil(ry);
+  for (let dy = -topo; dy <= topo; dy++) {
+    if ((dy >= 0) !== frente) continue;
+    const desliza = dy * incl;
+    for (const [ko, ki, cor] of faixas) {
+      const fo = 1 - (dy / (ry * ko)) * (dy / (ry * ko));
+      if (fo <= 0) continue;
+      const xo = rx * ko * Math.sqrt(fo);
+      const fi = 1 - (dy / (ry * ki)) * (dy / (ry * ki));
+      const xi = fi > 0 ? rx * ki * Math.sqrt(fi) : 0;
+      ctx.fillStyle = cor;
+      const y = Math.round(cy + dy);
+      const e0 = Math.round(cx + desliza - xo), e1 = Math.round(cx + desliza - xi);
+      const d0 = Math.round(cx + desliza + xi), d1 = Math.round(cx + desliza + xo);
+      if (e1 > e0) ctx.fillRect(e0, y, e1 - e0, 1);
+      if (d1 > d0) ctx.fillRect(d0, y, d1 - d0, 1);
     }
   }
 }
@@ -1746,6 +1991,11 @@ function anelSaturno(cx, cy, R, frente) {
 /* ── desenho ─────────────────────────────────────────────────── */
 const paraTelaX = wx => (wx - cam.x) * zoom;
 const paraTelaY = wy => (wy - cam.y) * zoom;
+/* está dentro do que a câmera mostra? folga negativa exige folga sobrando */
+function naTela(x, y, folga) {
+  const sx = paraTelaX(x), sy = paraTelaY(y);
+  return sx > -folga && sx < VL + folga && sy > -folga && sy < VA + folga;
+}
 
 function desenharMundo() {
   const sx0 = tremor > 0.3 ? (Math.random() - 0.5) * tremor / zoom : 0;
@@ -1811,7 +2061,7 @@ function desenharMundo() {
       const cxT2 = x + CFG.TERRA_RAIO, cyT2 = y + CFG.TERRA_RAIO;
       const pT = 0.5 + 0.5 * Math.sin(quadro * 0.055);
       for (let k = 4; k >= 1; k--) {
-        ctx.globalAlpha = (0.1 + pT * 0.06) * k / 4;
+        ctx.globalAlpha = (0.065 + pT * 0.04) * k / 4;
         disco(cxT2, cyT2, CFG.TERRA_RAIO + k * 2.1 + pT * 1.6, COR.glowTerra);
       }
       ctx.globalAlpha = 1;
@@ -1829,7 +2079,7 @@ function desenharMundo() {
       const cxM2 = x + CFG.MARTE_RAIO, cyM2 = y + CFG.MARTE_RAIO;
       const pM = 0.5 + 0.5 * Math.sin(quadro * 0.075 + 1.3);
       for (let k = 5; k >= 1; k--) {
-        ctx.globalAlpha = (0.13 + pM * 0.09) * k / 5;
+        ctx.globalAlpha = (0.085 + pM * 0.055) * k / 5;
         disco(cxM2, cyM2, CFG.MARTE_RAIO + k * 2.2 + pM * 2, COR.glowMarte);
       }
       ctx.globalAlpha = 1;
@@ -1846,7 +2096,7 @@ function desenharMundo() {
     if (cxS > -R * 3 && cyS > -R * 3 && cxS < VL + R * 3 && cyS < VA + R * 3) {
       const pS = 0.5 + 0.5 * Math.sin(quadro * 0.062 + 2.4);
       for (let k = 4; k >= 1; k--) {            // glow dourado
-        ctx.globalAlpha = (0.11 + pS * 0.07) * k / 4;
+        ctx.globalAlpha = (0.07 + pS * 0.045) * k / 4;
         disco(cxS, cyS, R + k * 2.2 + pS * 1.7, COR.glowSaturno);
       }
       ctx.globalAlpha = 1;
@@ -1855,6 +2105,69 @@ function desenharMundo() {
       ctx.drawImage(saturnoSprite, q * SAT_D, 0, SAT_D, SAT_D, cxS - R, cyS - R, SAT_D, SAT_D);
       anelSaturno(cxS, cyS, R, true);           // metade da frente
     }
+  }
+
+  /* Júpiter */
+  if (jupiter) {
+    const cxJ = Math.round(paraTelaX(jupiter.x));
+    const cyJ = Math.round(paraTelaY(jupiter.y));
+    const R = CFG.JUPITER_RAIO;
+    if (cxJ > -R * 4 && cyJ > -R * 4 && cxJ < VL + R * 4 && cyJ < VA + R * 4) {
+      // nuvem de fumaça: bolhas roxo-claro girando devagar em volta, mais
+      // largas que o glow e irregulares — é o que dá o ar de gigante gasoso
+      for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2 + jupiter.quadro * 0.006;
+        const rr = R * (1.5 + 0.5 * Math.sin(jupiter.quadro * 0.02 + i * 1.7));
+        ctx.globalAlpha = 0.1 + 0.05 * Math.sin(jupiter.quadro * 0.03 + i);
+        disco(cxJ + Math.cos(a) * rr * 0.7, cyJ + Math.sin(a) * rr * 0.45,
+              R * (0.7 + 0.25 * Math.sin(i * 2.3)), COR.fumaca);
+      }
+      const pJ = 0.5 + 0.5 * Math.sin(quadro * 0.058 + 3.7);
+      for (let k = 3; k >= 1; k--) {
+        ctx.globalAlpha = (0.055 + pJ * 0.032) * k / 3;
+        disco(cxJ, cyJ, R + k * 2 + pJ * 1.4, COR.glowJupiter);
+      }
+      ctx.globalAlpha = 1;
+      const q = Math.floor(jupiter.quadro / 7) % JUP_QUADROS;
+      ctx.drawImage(jupiterSprite, q * JUP_D, 0, JUP_D, JUP_D, cxJ - R, cyJ - R, JUP_D, JUP_D);
+    }
+  }
+
+  /* modo sucção: riscos girando em volta do corpo. O anel no raio real de
+     sucção chega a passar da largura da tela e não se vê — o que lê como
+     "está girando" são traços perto do personagem, rápidos */
+  if (espiral > 0.05) {
+    const bx0 = paraTelaX(buraco.x), by0 = paraTelaY(buraco.y);
+    const r0 = raioTela;
+    const sent = toque.sentido >= 0 ? 1 : -1;
+    for (let k = 0; k < 3; k++) {
+      const rr = r0 * (1.5 + k * 0.55);
+      const base = quadro * (0.05 + espiral * 0.11) * sent + k * 2.1;
+      for (let j2 = 0; j2 < 3; j2++) {
+        const arco = 0.5 + espiral * 0.7;
+        for (let t = 0; t < arco; t += 0.09) {
+          const a = base + j2 * (Math.PI * 2 / 3) + t;
+          ctx.globalAlpha = (0.2 + espiral * 0.55) * (1 - t / arco);
+          px(bx0 + Math.cos(a) * rr, by0 + Math.sin(a) * rr, COR.disco[4 + (k % 3)]);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* o raio de roubo: anel pontilhado que gira, mais aceso quando pega o rival */
+  if (dreno > 0) {
+    const q = Math.min(1, dreno / 40);
+    const rr = alcanceDreno() * zoom;
+    const passos = Math.max(28, Math.ceil(rr * 2));
+    ctx.globalAlpha = (drenando ? 0.55 : 0.26) * q;
+    for (let i = 0; i < passos; i++) {
+      if (i % 2) continue;
+      const a = (i / passos) * Math.PI * 2 - quadro * 0.03;
+      px(paraTelaX(buraco.x) + Math.cos(a) * rr,
+         paraTelaY(buraco.y) + Math.sin(a) * rr, COR.roxo);
+    }
+    ctx.globalAlpha = 1;
   }
 
   /* os blocos de gelo a caminho do rival */
@@ -1954,7 +2267,9 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   }
 
   // anel de acreção: duas voltas, fortes de um lado e apagadas do outro
-  const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04);
+  // no modo sucção o disco acelera junto: é a leitura de "estou girando ele"
+  const acel = comTurbo ? 1 + espiral * 2.6 : 1;
+  const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04) * acel;
   const N = paleta.length;
   for (let k = 0; k < 2; k++) {
     const rr = r + 1 + k;
@@ -2017,6 +2332,12 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
       ctx.fillRect(x0, y0, Math.round(l * tiro / CFG.SATURNO_TIRO), 2);
       y0 += 4;
     }
+    if (dreno > 0) {
+      ctx.fillStyle = COR.borda; ctx.fillRect(x0, y0, l, 2);
+      ctx.fillStyle = COR.roxo;
+      ctx.fillRect(x0, y0, Math.round(l * dreno / CFG.JUPITER_DRENO), 2);
+      y0 += 4;
+    }
     if (buraco.enjoo > 0) {
       ctx.fillStyle = COR.borda; ctx.fillRect(x0, y0, l, 2);
       ctx.fillStyle = COR.enjoo;
@@ -2070,7 +2391,7 @@ function desenharCometa() {
   // a coma pulsa: cresce e encolhe, e o brilho vai junto
   const pc = 0.5 + 0.5 * Math.sin(quadro * 0.19);
   for (let k = 4; k >= 1; k--) {
-    ctx.globalAlpha = (0.1 + pc * 0.1) * k / 4;
+    ctx.globalAlpha = (0.065 + pc * 0.065) * k / 4;
     disco(x, y, R * 0.7 + k * 2.3 + pc * 2.4, COR.cometa[3]);
   }
   ctx.globalAlpha = 0.5 + pc * 0.2;
@@ -2177,6 +2498,25 @@ function desenharClaraoIma() {
   ctx.globalAlpha = Math.pow(p, 1.4) * 0.7;
   ctx.fillStyle = COR.imaClarao;
   ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+}
+
+/* Enquanto Júpiter dura: clarão roxo nas laterais (mais forte a cada estrela
+   roubada) e um tremor de fundo baixinho, para a tela nunca ficar parada. */
+function desenharBrilhoRoxo() {
+  if (dreno <= 0 && flashRoxo <= 0) return;
+  const base = dreno > 0 ? 0.26 + 0.1 * Math.sin(quadro * 0.12) : 0;
+  const p = Math.max(base, flashRoxo > 0 ? flashRoxo / CFG.JUPITER_CLARAO : 0);
+  const larg = Math.max(6, Math.round(VL * 0.2));
+  for (let i = 0; i < larg; i++) {
+    const t = 1 - i / larg;
+    const a = Math.pow(t, 1.8) * p * 0.85;
+    if (a <= 0.012) continue;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = COR.jupiter[3];
+    ctx.fillRect(i, 0, 1, VA);
+    ctx.fillRect(VL - 1 - i, 0, 1, VA);
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -2351,17 +2691,18 @@ function desenharHUD() {
   desenharMarcaCometa();
   const LARG = 46;
 
-  /* você, à esquerda */
-  texto("voce " + buraco.nivel + "/" + CFG.NIVEL_MAX, 5, 5, COR.hud, 1);
-  if (buraco.nivel < CFG.NIVEL_MAX)
-    barra(5, 14, LARG, buraco.progresso / custoDoNivel(buraco.nivel), COR.disco[4]);
-  texto("estrelas " + buraco.comidas, 5, 21, COR.hudFraco, 1);
+  /* você, à esquerda. O nível não aparece mais: o tamanho na tela já conta
+     essa história. Fica o placar rumo à meta e a barrinha do próximo passo */
+  const meu = buraco.comidas + "/" + CFG.META;
+  texto(meu, 5, 5, COR.hud, 1);
+  barra(5, 14, LARG, buraco.nivel < CFG.NIVEL_MAX
+        ? buraco.progresso / custoDoNivel(buraco.nivel) : 1, COR.disco[4]);
 
   /* o rival, à direita, abaixo do botão de sair */
-  const tr = "rival " + rival.nivel + "/" + CFG.NIVEL_MAX;
+  const tr = rival.comidas + "/" + CFG.META;
   texto(tr, VL - 5 - larguraTexto(tr, 1), 20, COR.discoR[6], 1);
-  if (rival.nivel < CFG.NIVEL_MAX)
-    barra(VL - 5 - LARG, 29, LARG, rival.progresso / custoDoNivel(rival.nivel), COR.discoR[5]);
+  barra(VL - 5 - LARG, 29, LARG, rival.nivel < CFG.NIVEL_MAX
+        ? rival.progresso / custoDoNivel(rival.nivel) : 1, COR.discoR[5]);
 
   if (flash > 0) textoCentro("CRESCEU!", Math.round(VA * 0.3), COR.coracao[1], 2);
   desenharAnuncio();
@@ -2381,7 +2722,7 @@ function desenharFim() {
   const topo = Math.round(VA * 0.24);
   textoCentro(ganhou ? "voce venceu!" : "o rival venceu!", topo,
               ganhou ? COR.hud : COR.discoR[6], 2);
-  textoCentro("chegou ao nivel " + CFG.NIVEL_MAX, topo + 22, COR.hudFraco, 1);
+  textoCentro("chegou a " + CFG.META + " estrelas", topo + 22, COR.hudFraco, 1);
 
   const y0 = topo + 46;
   texto("voce", 24, y0, COR.hud, 1);
@@ -2431,8 +2772,18 @@ function desenharAnalogico() {
     px(cx + Math.cos(a) * CFG.RAIO_ANALOG, cy + Math.sin(a) * CFG.RAIO_ANALOG, COR.hudFraco);
   }
   ctx.globalAlpha = 0.85;
-  disco(toque.x / escala, toque.y / escala, 2, COR.hud);
+  disco(toque.x / escala, toque.y / escala, 2, espiral > 0.15 ? COR.disco[6] : COR.hud);
   ctx.globalAlpha = 1;
+  // rodando o dedo, o círculo do analógico acende junto
+  if (espiral > 0.05) {
+    ctx.globalAlpha = espiral * 0.8;
+    const sent = toque.sentido >= 0 ? 1 : -1;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + quadro * 0.09 * sent;
+      px(cx + Math.cos(a) * CFG.RAIO_ANALOG, cy + Math.sin(a) * CFG.RAIO_ANALOG, COR.disco[5]);
+    }
+    ctx.globalAlpha = 1;
+  }
 }
 
 /* Aberração cromática: separa o vermelho do ciano e desloca um para cada
@@ -2513,6 +2864,44 @@ function vinheta() {
 }
 
 
+/* Filtro do campo gravitacional de Júpiter: a imagem ondula em faixas
+   horizontais e ganha saturação. A ondulação é feita por bandas de 3 px
+   deslocadas na horizontal — uma cópia por banda, tudo na GPU, sem
+   getImageData. A saturação usa o modo de mistura "saturation" do canvas,
+   que é barato porque não sai do compositor.
+   Roda antes do HUD de propósito: número ondulando ninguém lê. */
+const bufJ = document.createElement("canvas");
+
+function campoRoxo() {
+  if (dreno <= 0) return;
+  // sobe rápido e desce no fim, para não cortar seco quando o poder acaba
+  const f = Math.min(1, (CFG.JUPITER_DRENO - dreno) / 12) * Math.min(1, dreno / 40);
+  if (f <= 0.02) return;
+  if (bufJ.width !== VL || bufJ.height !== VA) { bufJ.width = VL; bufJ.height = VA; }
+  const jx = bufJ.getContext("2d");
+  jx.globalCompositeOperation = "source-over";
+  jx.clearRect(0, 0, VL, VA);
+  jx.drawImage(tela, 0, 0);
+
+  const H = 3, amp = CFG.JUPITER_ONDA * f * (drenando ? 1.6 : 1);
+  for (let y = 0; y < VA; y += H) {
+    // duas senoides de períodos diferentes: uma só vira listra regular
+    const d = Math.sin(y * 0.14 + quadro * 0.1) * amp +
+              Math.sin(y * 0.047 - quadro * 0.055) * amp * 0.6;
+    ctx.drawImage(bufJ, 0, y, VL, H, Math.round(d), y, VL, H);
+  }
+  // saturação: o roxo puxa a cena inteira para o lado saturado
+  ctx.globalCompositeOperation = "saturation";
+  ctx.globalAlpha = 0.5 * f;
+  ctx.fillStyle = COR.roxo;
+  ctx.fillRect(0, 0, VL, VA);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 0.07 * f;
+  ctx.fillStyle = COR.jupiter[3];
+  ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+}
+
 function aberracao() {
   if (aberr <= 0) return;
   const forca = aberr / CFG.ABERRACAO;
@@ -2548,7 +2937,9 @@ function desenhar() {
   desenharClaraoIma();
   desenharClaraoTiro();
   desenharClaraoEnjoo();
+  desenharBrilhoRoxo();
   desenharBrilhoLateral();
+  campoRoxo();
   vinheta();
   if (cena === "menu") desenharMenu();
   else if (cena === "fim") desenharFim();
