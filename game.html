@@ -93,10 +93,8 @@ const CFG = {
   JUPITER_RAIO: 7,
   JUPITER_ESPERA: 600,   // mesma frequência dos outros planetas
   JUPITER_DRENO: 600,    // duração do poder (600 = 10s)
-  JUPITER_RITMO: 60,     // 1 estrela por segundo
-  JUPITER_ALCANCE: 3.2,  // raio de roubo, em múltiplos do raio do buraco.
-                         // Tem que ficar bem além do encostão, senão o jogador
-                         // precisa arriscar a trombada para usar o poder
+  JUPITER_RITMO: 20,     // 3 estrelas por segundo
+  JUPITER_FOLGA: 6,      // basta o rival estar na tela; a folga é a margem
   JUPITER_ONDA: 1.6,     // amplitude da ondulação durante o efeito
   JUPITER_CLARAO: 26,
 
@@ -153,65 +151,127 @@ const CFG = {
   /* modo sucção: rodar o dedo em círculo acelera a rotação do buraco */
   ESPIRAL_MIN: 0.7,      // giro acumulado onde o modo começa a valer
   ESPIRAL_MAX: 2,        // e onde chega no máximo (~1,3 volta por segundo)
-  ESPIRAL_ALCANCE: 1.1,  // quanto o alcance de sucção estica no máximo
-  ESPIRAL_FORCA: 1.6,    // e quanto o puxão fica mais firme
-  ESPIRAL_PLANETA: 0.5,  // com que força os planetas vêm junto
+  // ~70% mais fraco que a primeira versão: com o buraco grande, o alcance já
+  // é enorme, e um multiplicador alto por cima varria a tela de estrelas
+  ESPIRAL_ALCANCE: 0.33,  // quanto o alcance de sucção estica no máximo
+  ESPIRAL_FORCA: 0.48,    // e quanto o puxão fica mais firme
+  ESPIRAL_PLANETA: 0.15,  // com que força os planetas vêm junto
   RAIO_ANALOG: 22,
+  ESCURO: false,         // versão escura: fundo preto e estrelas brancas
   SEMENTE: 20260823
 };
 
 /* ── paleta ──────────────────────────────────────────────────── */
-const COR = {
-  vazio:  "#fdf7fa",                                  // o céu agora é branco
-  // seis degraus: a franja continua clarinha e o miolo agora fecha em um tom
-  // bem mais forte. É o contraste dentro da própria nuvem que dá o volume
-  nebs: [["#fff2f8","#ffdfec","#ffc4dc","#ffa3c8","#f97fae","#ec5b93"],   // rosa
-         ["#f1f8fe","#dcecfa","#c0e0f7","#9dcdf3","#74b3e8","#4d96d8"]],  // azul
-  poeira:["#f2e8ee","#ecdfe8","#e4d5e0"],
-  estrela:"#241c33",                                  // estrelas pretas
-  estrelaSuave:"#6a5f80",
-  disco: ["#fff0f6","#ffd9e8","#ffbcd6","#ff97be","#f56fa4","#e04d8c","#c23b76","#a32d63"],
-  halo:   "#ffc4dc",
-  contorno:"#f0b9d0",                                 // fio que dá silhueta ao buraco
-  corpo:  "#ffffff",
-  rosto:  "#2b2233",
-  blush:  "#ff9ecb",
-  coracao:["#e04d8c","#f56fa4","#ffbcd6"],
-  arcoiris:["#ff9ec4","#ffc39a","#ffe98a","#a8e6a1","#8fe3ef","#9fc0ff","#cba6ff"],
-  cadente:["#ffe9a8","#ffd166","#f0b53f"],
-  // verde-claro de propósito: o cometa era azul e se confundia com o turbo
-  cometa: ["#f3fdf7","#cdf4de","#a0e7c2","#6ed4a4","#42b583"],
-  enjoo:  "#7ed4a6",
-  enjooClarao:"#dcf7e9",
-  // anel de acreção enquanto está enjoado: mesma escada de tons do rosa
-  discoV: ["#f3fdf7","#d9f7e6","#b4ecce","#8adfb2","#5ecb94","#3cae7b","#2c8f65","#1f7050"],
-  glowTerra:"#5aa8e0",
-  glowMarte:"#e8342a",
-  saturno: ["#fffdf0","#fff4cf","#ffe9a8","#f2d074","#d4ac4a","#a8842f"],
-  bloco:   ["#f2fcff","#cdeefb","#a2daf2","#74bfe0"],
-  glowSaturno:"#e8b53a",     // dourado, não amarelo pastel: o corpo já é claro
-  jupiter: ["#f6efff","#e6d6f7","#cdb2ee","#ac8ade","#8a63c6","#6a45a0"],
-  fumaca:  "#d8c2f2",        // a nuvem roxo-claro em volta
-  roxo:    "#9a6fd4",
-  roxoClarao:"#e6d6f7",
-  glowJupiter:"#8a63c6",
-  marte:  ["#f4b98a","#e8875a","#d1603c","#a8422a"],
-  ima:    "#e8734a",
-  imaClarao:"#ffd0b8",
-  imaPart:["#ffc9a3","#f4a06a","#e8734a"],
-  turbo:  "#4fb8e0",
-  turboClarao:"#bfe4f7",
-  turboPart:["#a9d2f2","#7fb9e4","#5aa4dc","#ffd98a","#ffc75c","#f0b53f"],
-  discoR: ["#f2f8fe","#dcecfa","#c0dcf6","#9cc6f0","#78ade6","#5a93d6","#4477bc","#35619e"],
-  rivalHalo:"#c4dcf6",
-  rivalContorno:"#a9c6ea",
-  rivalBlush:"#9fc8ee",
-  borda:  "#f3dbe6",
-  hud:    "#e8639c",
-  hudFraco:"#c9a0b6",
-  aviso:  "#e8639c",
-  painel: "#fffdfe"
+/* ── paletas ───────────────────────────────────────────────────
+   CFG.ESCURO troca entre as duas. Tudo no jogo lê de COR, então a troca
+   é de uma linha — mas as nebulosas são geradas na abertura, então mudar
+   em tempo de execução exige regerar as camadas. */
+const PALETAS = {
+  claro: {
+    vazio:  "#fdf7fa",                                  // o céu agora é branco
+    // seis degraus: a franja continua clarinha e o miolo agora fecha em um tom
+    // bem mais forte. É o contraste dentro da própria nuvem que dá o volume
+    nebs: [["#fff2f8","#ffdfec","#ffc4dc","#ffa3c8","#f97fae","#ec5b93"],   // rosa
+           ["#f1f8fe","#dcecfa","#c0e0f7","#9dcdf3","#74b3e8","#4d96d8"]],  // azul
+    poeira:["#f2e8ee","#ecdfe8","#e4d5e0"],
+    estrela:"#241c33",                                  // estrelas pretas
+    estrelaSuave:"#6a5f80",
+    disco: ["#fff0f6","#ffd9e8","#ffbcd6","#ff97be","#f56fa4","#e04d8c","#c23b76","#a32d63"],
+    halo:   "#ffc4dc",
+    contorno:"#f0b9d0",                                 // fio que dá silhueta ao buraco
+    corpo:  "#ffffff",
+    rosto:  "#2b2233",
+    blush:  "#ff9ecb",
+    coracao:["#e04d8c","#f56fa4","#ffbcd6"],
+    arcoiris:["#ff9ec4","#ffc39a","#ffe98a","#a8e6a1","#8fe3ef","#9fc0ff","#cba6ff"],
+    cadente:["#ffe9a8","#ffd166","#f0b53f"],
+    // verde-claro de propósito: o cometa era azul e se confundia com o turbo
+    cometa: ["#f3fdf7","#cdf4de","#a0e7c2","#6ed4a4","#42b583"],
+    enjoo:  "#7ed4a6",
+    enjooClarao:"#dcf7e9",
+    // anel de acreção enquanto está enjoado: mesma escada de tons do rosa
+    discoV: ["#f3fdf7","#d9f7e6","#b4ecce","#8adfb2","#5ecb94","#3cae7b","#2c8f65","#1f7050"],
+    glowTerra:"#5aa8e0",
+    glowMarte:"#e8342a",
+    saturno: ["#fffdf0","#fff4cf","#ffe9a8","#f2d074","#d4ac4a","#a8842f"],
+    bloco:   ["#f2fcff","#cdeefb","#a2daf2","#74bfe0"],
+    glowSaturno:"#e8b53a",     // dourado, não amarelo pastel: o corpo já é claro
+    jupiter: ["#f6efff","#e6d6f7","#cdb2ee","#ac8ade","#8a63c6","#6a45a0"],
+    fumaca:  "#d8c2f2",        // a nuvem roxo-claro em volta
+    roxo:    "#9a6fd4",
+    roxoClarao:"#e6d6f7",
+    glowJupiter:"#8a63c6",
+    marte:  ["#f4b98a","#e8875a","#d1603c","#a8422a"],
+    ima:    "#e8734a",
+    imaClarao:"#ffd0b8",
+    imaPart:["#ffc9a3","#f4a06a","#e8734a"],
+    turbo:  "#4fb8e0",
+    turboClarao:"#bfe4f7",
+    turboPart:["#a9d2f2","#7fb9e4","#5aa4dc","#ffd98a","#ffc75c","#f0b53f"],
+    discoR: ["#f2f8fe","#dcecfa","#c0dcf6","#9cc6f0","#78ade6","#5a93d6","#4477bc","#35619e"],
+    rivalHalo:"#c4dcf6",
+    rivalContorno:"#a9c6ea",
+    rivalBlush:"#9fc8ee",
+    borda:  "#f3dbe6",
+    hud:    "#e8639c",
+    hudFraco:"#c9a0b6",
+    aviso:  "#e8639c",
+    painel: "#fffdfe"
+  },
+  /* Versão escura: o fundo vira preto e as estrelas viram brancas. Não é uma
+     inversão aritmética — inverter pastel dá cor lavada. As escadas de rosa e
+     azul foram REVIRADAS: no claro elas vão do quase-branco ao forte conforme
+     a intensidade sobe; aqui vão do quase-preto ao néon, porque no escuro
+     quem tem intensidade é quem brilha. */
+  escuro: {
+    vazio:  "#07050e",
+    nebs: [["#1a0c18","#331330","#5c1e4d","#932c74","#cf4499","#ff6fc0"],   // rosa
+           ["#0a1020","#12233f","#1c3f6e","#2a66a6","#3f97d6","#6ec6f5"]],  // azul
+    poeira:["#171225","#1f1830","#28203c"],
+    estrela:"#ffffff",
+    estrelaSuave:"#9c90b4",
+    disco: ["#2a0f22","#48173a","#6b2154","#912f72","#c04490","#e75fae","#ff7cc4","#ffa8d8"],
+    halo:   "#c04490",
+    contorno:"#ff7cc4",
+    corpo:  "#0d0a16",
+    rosto:  "#ffeaf6",
+    blush:  "#ff5fa8",
+    coracao:["#ff7cc4","#ff9ecb","#ffc4dc"],
+    arcoiris:["#ff6fb4","#ffab6a","#ffe06a","#7de08a","#5fd8ef","#7aa8ff","#b48cff"],
+    cadente:["#fff3c7","#ffd166","#e0a52c"],
+    cometa: ["#eafff3","#9df0c4","#5fdda2","#31bd80","#1c8f5f"],
+    enjoo:  "#4fc98f",
+    enjooClarao:"#0f2e20",
+    discoV: ["#0d2a1c","#12432c","#1a5f3f","#248055","#2fa26e","#46c489","#68dda4","#96eec2"],
+    glowTerra:"#4f9fe0",
+    glowMarte:"#ff3a2c",
+    saturno: ["#fffdf0","#fff4cf","#ffe9a8","#f2d074","#d4ac4a","#a8842f"],
+    bloco:   ["#f2fcff","#cdeefb","#a2daf2","#74bfe0"],
+    glowSaturno:"#f0bf46",
+    jupiter: ["#f6efff","#e6d6f7","#cdb2ee","#ac8ade","#8a63c6","#6a45a0"],
+    fumaca:  "#7a5aa8",
+    roxo:    "#b088e8",
+    roxoClarao:"#2a1a44",
+    glowJupiter:"#9a6fd4",
+    marte:  ["#f4b98a","#e8875a","#d1603c","#a8422a"],
+    ima:    "#ff8b5a",
+    imaClarao:"#3a1a10",
+    imaPart:["#ffc9a3","#f4a06a","#e8734a"],
+    turbo:  "#5fc8f0",
+    turboClarao:"#0d2c40",
+    turboPart:["#a9d2f2","#7fb9e4","#5aa4dc","#ffd98a","#ffc75c","#f0b53f"],
+    discoR: ["#0d1626","#132842","#1b4068","#245c94","#2e7ec2","#45a3e0","#6ec8f5","#a3e0ff"],
+    rivalHalo:"#2e7ec2",
+    rivalContorno:"#6ec8f5",
+    rivalBlush:"#4fb0e8",
+    borda:  "#241c33",
+    hud:    "#ff7cc4",
+    hudFraco:"#7d6f92",
+    aviso:  "#ff7cc4",
+    painel: "#140f22"
+  }
 };
+const COR = CFG.ESCURO ? PALETAS.escuro : PALETAS.claro;
 
 /* ── fonte pixel 5x7 (a 8a linha guarda as descidas de g, j, p, q, y) ── */
 const FONTE_H = 8;
@@ -903,7 +963,7 @@ function botaoJogar() {
   const l = 90, a = 22;
   return { x: Math.round((VL - l) / 2), y: Math.round(VA * 0.60), l: l, a: a };
 }
-function botaoSair() { return { x: VL - 16, y: 4, l: 12, a: 12 }; }
+function botaoSair() { return { x: Math.round(VL / 2) - 6, y: 3, l: 12, a: 12 }; }
 function dentro(gx, gy, r, folga) {
   folga = folga || 0;
   return gx >= r.x - folga && gx <= r.x + r.l + folga &&
@@ -926,6 +986,7 @@ let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, espera
 let marte = null, esperaMarte = 0, ima = 0, flashIma = 0;
 let saturno = null, esperaSaturno = 0, tiro = 0, recargaTiro = 0, flashTiro = 0, blocos = [];
 let jupiter = null, esperaJupiter = 0, dreno = 0, ritmoDreno = 0, flashRoxo = 0, drenando = false;
+let roubadas = [];        // estrelas viajando do rival para o jogador
 let anuncio = null;
 let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, arco = 0, quadro = 0;
 let esperaColisao = 0, cadente = null, esperaCadente = 0;
@@ -1065,7 +1126,7 @@ function reiniciar() {
   saturno = null; esperaSaturno = CFG.SATURNO_ESPERA;
   tiro = 0; recargaTiro = 0; flashTiro = 0; blocos = [];
   jupiter = null; esperaJupiter = CFG.JUPITER_ESPERA;
-  dreno = 0; ritmoDreno = 0; flashRoxo = 0; drenando = false;
+  dreno = 0; ritmoDreno = 0; flashRoxo = 0; drenando = false; roubadas = [];
   anuncio = null;
   cam.x = buraco.x - visaoL() / 2;
   cam.y = buraco.y - visaoA() / 2;
@@ -1587,20 +1648,15 @@ function passo() {
   drenando = false;
   if (dreno > 0) {
     dreno--;
-    const d = Math.hypot(rival.x - buraco.x, rival.y - buraco.y);
-    if (d < alcanceDreno()) {
+    // basta estar na mesma tela: com raio fixo, no zoom afastado o rival
+    // aparecia na tela e mesmo assim ficava fora do alcance, o que confunde
+    if (naTela(rival.x, rival.y, -CFG.JUPITER_FOLGA)) {
       drenando = true;
       if (--ritmoDreno <= 0) {
         ritmoDreno = CFG.JUPITER_RITMO;
-        if (rival.comidas > 0) {
-          perderEstrelas(rival, 1);
-          ganharEstrelas(buraco, 1);
-          rival.pulso = 1; rival.surpresa = Math.max(rival.surpresa, 16);
-          tremor = Math.max(tremor, 5);
-          flashRoxo = Math.max(flashRoxo, 16);
-        }
+        if (rival.comidas > 0) arrancarEstrela();
       }
-      if (quadro % 2 === 0) fioRoxo();
+      if (quadro % 3 === 0) fioRoxo();
     } else {
       ritmoDreno = Math.min(ritmoDreno, 20);    // sai do raio, quase reinicia
     }
@@ -1617,6 +1673,7 @@ function passo() {
   }
   passoBlocos(L);
 
+  passoRoubadas();
   if (espiral > 0.02) puxarPlanetas();
   passoParticulas();
 
@@ -1895,11 +1952,57 @@ function puxarPlanetas() {
   }
 }
 
-/* o raio de roubo, em unidades de mundo. Fica bem além do encostão: se o
-   jogador tivesse que colar no rival para roubar, o poder viraria um convite
-   à trombada, que é justamente o que tira estrela dele */
-function alcanceDreno() {
-  return raioMundo() * CFG.JUPITER_ALCANCE + raioMundoNivel(rival.nivel);
+/* A estrela sai do rival NA HORA (o contador dele cai no mesmo quadro, para
+   ele ver que está perdendo) e viaja até o jogador, que só marca o ponto
+   quando ela chega. É o trajeto que conta a história. */
+function arrancarEstrela() {
+  perderEstrelas(rival, 1);
+  rival.pulso = 1;
+  rival.boca = 14;
+  rival.surpresa = Math.max(rival.surpresa, 20);
+  tremor = Math.max(tremor, 5);
+  flashRoxo = Math.max(flashRoxo, 14);
+  aneis.push({ x: rival.x, y: rival.y, r: 2, vida: 14, total: 14, rival: true });
+  const rr = raioMundoNivel(rival.nivel);
+  const a = Math.random() * Math.PI * 2;
+  roubadas.push({
+    x0: rival.x + Math.cos(a) * rr * 0.8, y0: rival.y + Math.sin(a) * rr * 0.8,
+    x: 0, y: 0, t: 0, giro: Math.random() * Math.PI,
+    // a curva sai por um lado: em linha reta as três por segundo viram um fio só
+    curva: (Math.random() < 0.5 ? -1 : 1) * (0.2 + Math.random() * 0.3),
+    passo: 1 / (22 + Math.floor(Math.random() * 10))
+  });
+  for (let k = 0; k < 8; k++) {
+    const b = Math.random() * Math.PI * 2, v = (0.5 + Math.random()) / zoom;
+    faiscas.push({ x: rival.x, y: rival.y, vx: Math.cos(b) * v, vy: Math.sin(b) * v,
+                   vida: 12 + Math.floor(Math.random() * 8), arrasto: 0.95, tipo: "raio",
+                   cor: COR.jupiter[2 + Math.floor(Math.random() * 3)] });
+  }
+}
+
+function passoRoubadas() {
+  for (let i = roubadas.length - 1; i >= 0; i--) {
+    const e = roubadas[i];
+    e.t += e.passo;
+    e.giro += 0.2;
+    if (e.t >= 1) {
+      // chegou: agora sim o ponto entra, com o mesmo estalo de engolir estrela
+      ganharEstrelas(buraco, 1);
+      buraco.pulso = 1; buraco.boca = 16;
+      aneis.push({ x: buraco.x, y: buraco.y, r: 2, vida: 14, total: 14, rival: false });
+      faiscar(buraco.x, buraco.y, 8, 3, 8);
+      roubadas.splice(i, 1);
+      continue;
+    }
+    // sempre mira onde o jogador está AGORA: se ele foge, a estrela persegue
+    const t = e.t;
+    const mx = e.x0 + (buraco.x - e.x0) * t;
+    const my = e.y0 + (buraco.y - e.y0) * t;
+    const dx = buraco.x - e.x0, dy = buraco.y - e.y0;
+    const arco = Math.sin(t * Math.PI) * e.curva;
+    e.x = mx - dy * arco;
+    e.y = my + dx * arco;
+  }
 }
 
 function engolirJupiter(dono) {
@@ -2155,19 +2258,15 @@ function desenharMundo() {
     ctx.globalAlpha = 1;
   }
 
-  /* o raio de roubo: anel pontilhado que gira, mais aceso quando pega o rival */
-  if (dreno > 0) {
-    const q = Math.min(1, dreno / 40);
-    const rr = alcanceDreno() * zoom;
-    const passos = Math.max(28, Math.ceil(rr * 2));
-    ctx.globalAlpha = (drenando ? 0.55 : 0.26) * q;
-    for (let i = 0; i < passos; i++) {
-      if (i % 2) continue;
-      const a = (i / passos) * Math.PI * 2 - quadro * 0.03;
-      px(paraTelaX(buraco.x) + Math.cos(a) * rr,
-         paraTelaY(buraco.y) + Math.sin(a) * rr, COR.roxo);
-    }
+  /* as estrelas roubadas, a caminho: giram e deixam rastro roxo */
+  for (const e of roubadas) {
+    const ex = paraTelaX(e.x), ey = paraTelaY(e.y);
+    ctx.globalAlpha = 0.45;
+    disco(ex, ey, 3, COR.jupiter[3]);
     ctx.globalAlpha = 1;
+    const spr = ESTRELAS_SPR[e.giro % 1.6 < 0.8 ? 1 : 2];
+    carimbo(spr, ex, ey, COR.estrela);
+    px(ex, ey, COR.jupiter[1]);
   }
 
   /* os blocos de gelo a caminho do rival */
@@ -2602,9 +2701,10 @@ function marcaNaBorda(mx0, my0, cores, estilo) {
 
   // a margem encolhe com o pulso: é isso que faz a seta cutucar para fora
   const marg = 15 - pulso * 4;
+  const tetoHUD = 22;                            // não encosta no placar
   const m = Math.max(Math.abs(dx) / (VL / 2 - marg),
                      Math.abs(dy) / (VA / 2 - marg), 0.001);
-  const bx = cx + dx / m, by = cy + dy / m;
+  const bx = cx + dx / m, by = Math.max(cy + dy / m, dy < 0 ? tetoHUD : -1e9);
 
   const tam = 8 + pulso * 2.6;
   const larg = 4.2;
@@ -2689,19 +2789,24 @@ function desenharHUD() {
   desenharMarcaRival();
   desenharMarcaCadente();
   desenharMarcaCometa();
-  const LARG = 46;
+  /* Placar simétrico no topo: você à esquerda, o rival à direita, os dois na
+     MESMA altura, e o botão de sair no meio. Antes o X ficava no canto e
+     empurrava o bloco do rival para baixo — as duas barras nunca casavam. */
+  const b0 = botaoSair();
+  const LARG = Math.max(28, Math.min(52, b0.x - 5 - 6));
+  const meu = "" + buraco.comidas;
+  const tr = "" + rival.comidas;
+  const alvo = "/" + CFG.META;
 
-  /* você, à esquerda. O nível não aparece mais: o tamanho na tela já conta
-     essa história. Fica o placar rumo à meta e a barrinha do próximo passo */
-  const meu = buraco.comidas + "/" + CFG.META;
-  texto(meu, 5, 5, COR.hud, 1);
-  barra(5, 14, LARG, buraco.nivel < CFG.NIVEL_MAX
+  texto(meu, 5, 4, COR.hud, 1);
+  texto(alvo, 5 + larguraTexto(meu, 1) + 1, 4, COR.hudFraco, 1);
+  barra(5, 13, LARG, buraco.nivel < CFG.NIVEL_MAX
         ? buraco.progresso / custoDoNivel(buraco.nivel) : 1, COR.disco[4]);
 
-  /* o rival, à direita, abaixo do botão de sair */
-  const tr = rival.comidas + "/" + CFG.META;
-  texto(tr, VL - 5 - larguraTexto(tr, 1), 20, COR.discoR[6], 1);
-  barra(VL - 5 - LARG, 29, LARG, rival.nivel < CFG.NIVEL_MAX
+  const dirTot = larguraTexto(tr, 1) + 1 + larguraTexto(alvo, 1);
+  texto(tr, VL - 5 - dirTot, 4, COR.discoR[6], 1);
+  texto(alvo, VL - 5 - larguraTexto(alvo, 1), 4, COR.hudFraco, 1);
+  barra(VL - 5 - LARG, 13, LARG, rival.nivel < CFG.NIVEL_MAX
         ? rival.progresso / custoDoNivel(rival.nivel) : 1, COR.discoR[5]);
 
   if (flash > 0) textoCentro("CRESCEU!", Math.round(VA * 0.3), COR.coracao[1], 2);
