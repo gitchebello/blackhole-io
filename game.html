@@ -386,7 +386,12 @@ const COR = CFG.ESCURO ? PALETAS.escuro : PALETAS.claro;
    a camada de nebulosa continua sendo gerada mas sai lisa — um fundo chapado.
    Sem estrutura extra: o resto do jogo nem sabe que elas sumiram. */
 const CEU_PB = "#000000";
-const NUVEM_PB = [CEU_PB, CEU_PB, CEU_PB, CEU_PB, CEU_PB, CEU_PB];
+/* Rampa de 6 degraus da nebulosa no escuro. Os dois primeiros são o próprio
+   céu: é o que ENCOLHE a nuvem, porque a franja rala — que no claro ocupa a
+   maior parte da mancha — simplesmente não é pintada, e só o miolo aparece.
+   O topo para num cinza-branco fosco: no all black puro dava para se perder
+   sem nenhum ponto de referência, mas nuvem clara demais rouba o fundo. */
+const NUVEM_PB = [CEU_PB, CEU_PB, "#0d0d12", "#16161d", "#22222b", "#33333e"];
 const FUNDO_PB = {
   vazio:  CEU_PB,
   /* O CORPO do personagem vira preto e o traço do rosto vira branco. É a
@@ -1128,12 +1133,19 @@ function comprimir(r, nome) {
            l: r.l - dl, a: r.a - da };
 }
 
-function caixa(r, corFundo, corBorda) {
+/* Caixa de botão: quinas cortadas e contorno de espessura livre. O traço de
+   1 px sumia contra o céu cheio de estrela — a 2 px o botão vira um objeto
+   sólido, com dentro e fora, em vez de um retângulo desenhado por cima. */
+function caixa(r, corFundo, corBorda, grossura) {
+  const g = grossura || 1;
   ctx.fillStyle = corFundo;
-  ctx.fillRect(r.x, r.y, r.l, r.a);
+  ctx.fillRect(r.x + 1, r.y, r.l - 2, r.a);      // as duas faixas cruzadas
+  ctx.fillRect(r.x, r.y + 1, r.l, r.a - 2);      // deixam as 4 quinas de fora
   ctx.fillStyle = corBorda;
-  ctx.fillRect(r.x, r.y, r.l, 1); ctx.fillRect(r.x, r.y + r.a - 1, r.l, 1);
-  ctx.fillRect(r.x, r.y, 1, r.a); ctx.fillRect(r.x + r.l - 1, r.y, 1, r.a);
+  ctx.fillRect(r.x + 1, r.y, r.l - 2, g);
+  ctx.fillRect(r.x + 1, r.y + r.a - g, r.l - 2, g);
+  ctx.fillRect(r.x, r.y + 1, g, r.a - 2);
+  ctx.fillRect(r.x + r.l - g, r.y + 1, g, r.a - 2);
 }
 
 /* ── botões (retângulos em pixels do jogo; o toque tem folga extra) ── */
@@ -4084,7 +4096,7 @@ function desenharFim() {
 
   const b = comprimir(botaoJogar(), "jogar");
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
-  caixa(b, COR.painel, pulso > 0.5 ? COR.disco[4] : COR.disco[3]);
+  caixa(b, COR.painel, pulso > 0.5 ? COR.disco[4] : COR.disco[3], 2);
   texto("de novo", b.x + Math.round((b.l - larguraTexto("de novo", 2)) / 2),
         b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
 
@@ -4102,75 +4114,91 @@ function botaoOponente(i) {
   return { x: x0 + i * (l + esp), y: b.y + b.a + 16, l: l, a: 18 };
 }
 
-/* liga/desliga o som: só o ícone da caixinha, sem rótulo nem chave */
+/* Som e fundo: dois botões de verdade, com caixa e contorno próprios. Antes
+   eram só os iconezinhos soltos sobre uma placa, e não se lia que dava para
+   apertar — nem qual dos dois estava ligado. */
+const ICO_L = 30, ICO_A = 24, ICO_ESP = 10;
 function botaoSom() {
   const b0 = botaoOponente(0);
-  return { x: Math.round(VL / 2) - 26, y: b0.y + b0.a + 10, l: 17, a: 11 };
+  return { x: Math.round((VL - ICO_L * 2 - ICO_ESP) / 2),
+           y: b0.y + b0.a + 13, l: ICO_L, a: ICO_A };
 }
 function botaoFundo() {
-  const b0 = botaoOponente(0);
-  return { x: Math.round(VL / 2) + 9, y: b0.y + b0.a + 10, l: 13, a: 11 };
+  const b = botaoSom();
+  return { x: b.x + ICO_L + ICO_ESP, y: b.y, l: ICO_L, a: ICO_A };
 }
 
-/* Ícone do fundo: lua minguante com duas estrelinhas. O meio-círculo que
-   havia aqui era ambíguo — lia como "meio cheio" tanto quanto como contraste.
-   Lua e estrela não deixam dúvida do que o botão faz. */
+/* Os dois ícones são o dobro do tamanho dos antigos e desenhados em massa
+   cheia, sem traço de 1 px: em 24 px de botão o que se lê de longe é a
+   silhueta, não o detalhe. A lua saiu de um círculo menos outro deslocado
+   para a direita — a mordida fica limpa, sem o bico torto do desenho à mão. */
 const ICONE_LUA = [
-  "..###..",
-  ".##....",
-  "##.....",
-  "##.....",
-  "##.....",
-  ".##....",
-  "..###.."
+  "....####.....",
+  "..####.......",
+  ".####........",
+  ".####........",
+  "####.........",
+  "####.........",
+  "####.........",
+  "####.........",
+  "####.........",
+  ".####........",
+  ".####........",
+  "..####.......",
+  "....####....."
 ];
-function desenharIconeFundo(x, y, pb) {
+const ESTRELINHA = [".#.", "###", ".#."];
+function desenharIconeFundo(cx, cy, pb) {
   const c = pb ? COR.disco[5] : COR.hudFraco;
-  carimbo(ICONE_LUA, x + 4, y + 5, c);
-  px(x + 9, y + 2, c);                           // estrelinhas ao lado
-  px(x + 8, y + 3, c); px(x + 10, y + 3, c); px(x + 9, y + 4, c);
-  px(x + 11, y + 7, c);
+  // +2: carimbo centraliza pela caixa, mas a massa da lua fica toda na
+  // metade esquerda dela, e sem o empurrão o ícone nasce torto no botão
+  carimbo(ICONE_LUA, cx + 2, cy, c);
+  // duas estrelinhas no vão da lua, do lado em que ela está aberta
+  carimbo(ESTRELINHA, cx + 7, cy - 4, c);
+  px(cx + 5, cy + 4, c);
 }
 
-/* Caixinha de som como SPRITE, do jeito que o resto do jogo desenha coisa
-   pequena. A versão anterior era feita com contas de cone e arcos e saía
-   torta: em 9 px de altura não há espaço para arredondar nada por fórmula,
-   cada pixel tem de ser escolhido. */
-const ICONE_CAIXA = [
-  "....#",
-  "...##",
-  "..###",
-  "#####",
-  "#####",
-  "#####",
-  "..###",
-  "...##",
-  "....#"
+/* Caixa de som: corpo maciço, cone reto e duas ondas em arco. */
+const ICONE_SOM = [
+  "..................",
+  "........#.........",
+  ".......##.....#...",
+  "......###....##...",
+  ".########..#.##...",
+  ".########.##.##...",
+  ".########.##.##...",
+  ".########.##.##...",
+  ".########..#.##...",
+  "......###....##...",
+  ".......##.....#...",
+  "........#.........",
+  ".................."
 ];
-const ICONE_ONDAS = [
-  "....",
-  "...#",
-  "...#",
-  ".#.#",
-  ".#.#",
-  ".#.#",
-  "...#",
-  "...#",
-  "...."
-];
-const ICONE_MUDO = [
-  "#...#",
-  ".#.#.",
-  "..#..",
-  ".#.#.",
-  "#...#"
+/* No mudo o corpo fica INTEIRO e só as ondas viram um X. A barra cortando o
+   ícone na diagonal é mais universal, mas em 13 px de altura ela comia o
+   alto-falante e sobrava um traço em cima de um caco. Os dois sprites têm a
+   mesma largura de propósito: o corpo não pula de lugar ao ligar e desligar,
+   e o que muda é só o lado direito. */
+const ICONE_SOM_MUDO = [
+  "..................",
+  "........#.........",
+  ".......##.........",
+  "......###.##....##",
+  ".########..##..##.",
+  ".########...####..",
+  ".########....##...",
+  ".########...####..",
+  ".########..##..##.",
+  "......###.##....##",
+  ".......##.........",
+  "........#.........",
+  ".................."
 ];
 
-function desenharIconeSom(x, y, ligado) {
-  const c = ligado ? COR.disco[5] : COR.hudFraco;
-  carimbo(ICONE_CAIXA, x + 3, y + 5, c);
-  if (ligado) carimbo(ICONE_ONDAS, x + 10, y + 5, c);
-  else carimbo(ICONE_MUDO, x + 11, y + 5, c);
+
+function desenharIconeSom(cx, cy, ligado) {
+  carimbo(ligado ? ICONE_SOM : ICONE_SOM_MUDO, cx, cy,
+          ligado ? COR.disco[5] : COR.hudFraco);
 }
 
 function desenharMenu() {
@@ -4194,28 +4222,27 @@ function desenharMenu() {
     const escolhido = CFG.RIVAIS === i + 1;
     // cada opção pinta na cor do rival que ela acrescenta
     const cor = COR.rivais[i].disco[6];
-    caixa(bo, escolhido ? COR.painel : COR.vazio, escolhido ? cor : COR.hudFraco);
+    caixa(bo, escolhido ? COR.painel : COR.vazio,
+          escolhido ? cor : COR.hudFraco, escolhido ? 2 : 1);
     const n = "" + (i + 1);
     texto(n, bo.x + Math.round((bo.l - larguraTexto(n, 1)) / 2),
           bo.y + Math.round((bo.a - FONTE_H) / 2) + 1,
           escolhido ? cor : COR.hudFraco, 1);
   }
 
-  /* som e fundo, lado a lado. Vão sobre uma placa escura porque os bonecos
-     ficam passeando pelo menu e passavam bem por baixo dos ícones */
-  const bsr = botaoSom(), bfr = botaoFundo();
-  ctx.globalAlpha = 0.55;
-  ctx.fillStyle = COR.painel;
-  ctx.fillRect(bsr.x - 4, bsr.y - 3, (bfr.x + bfr.l) - bsr.x + 8, bsr.a + 6);
-  ctx.globalAlpha = 1;
+  /* som e fundo, lado a lado. Cada um na sua caixa: os bonecos passeiam pelo
+     menu e passavam bem por baixo dos ícones soltos. Quem está LIGADO fica
+     com o contorno aceso; quem está desligado fica no traço apagado. */
   const bs = comprimir(botaoSom(), "som");
-  desenharIconeSom(bs.x, bs.y, SOM.ligado);
+  caixa(bs, COR.painel, SOM.ligado ? COR.disco[4] : COR.hudFraco, 2);
+  desenharIconeSom(bs.x + bs.l / 2, bs.y + bs.a / 2, SOM.ligado);
   const bf = comprimir(botaoFundo(), "fundo");
-  desenharIconeFundo(bf.x, bf.y, CFG.FUNDO_PB);
+  caixa(bf, COR.painel, CFG.FUNDO_PB ? COR.disco[4] : COR.hudFraco, 2);
+  desenharIconeFundo(bf.x + bf.l / 2, bf.y + bf.a / 2, CFG.FUNDO_PB);
 
   const b = comprimir(botaoJogar(), "jogar");
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
-  caixa(b, COR.painel, pulso > 0.5 ? COR.disco[5] : COR.disco[4]);
+  caixa(b, COR.painel, pulso > 0.5 ? COR.disco[5] : COR.disco[4], 2);
   texto("JOGAR", b.x + Math.round((b.l - larguraTexto("JOGAR", 2)) / 2),
         b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
 }
