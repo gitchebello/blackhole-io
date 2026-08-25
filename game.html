@@ -147,6 +147,7 @@ const CFG = {
   COLISAO_ESPERA: 50,    // quadros de carência para não trombar em sequência
   COLISAO_SURPRESA: 50,  // quadros de cara de espanto depois da pancada
   ANUNCIO: 80,           // quadros que o aviso do efeito fica na tela
+  PERDA_ESPERA: 48,      // janela para juntar estrelas perdidas num aviso só
   COLISAO_TREMOR: 52,
   COLISAO_ABERR: 44,
   COLISAO_CUSTA_NIVEL: true,   // a perda também tira progresso, não só o contador
@@ -1088,6 +1089,10 @@ let expansao = 0;       // 1 no instante do nível novo, decai até 0
 let historico = [];     // { t: segundos, v: [estrelas de cada um] }
 let quadroInicio = 0;   // `quadro` nunca zera; o tempo da partida sai da diferença
 let primeiro = null;    // quem está com mais estrelas; ganha a coroa
+/* Quanto o inimigo já tirou de você, por origem. O dreno e o gelo tiram de
+   pouco em pouco — anunciar cada estrela viraria um piscar sem sentido —,
+   então acumulam e o total sai quando a agressão para. */
+let perdaAcum = { dreno: 0, gelo: 0 }, perdaEspera = { dreno: 0, gelo: 0 };
 let coroaAnim = 0;      // 1 no instante em que a coroa troca de cabeça
 const cam = { x: 0, y: 0 };
 
@@ -1221,6 +1226,7 @@ function reiniciar() {
   arco = 0; turbo = 0; esperaColisao = 0; expansao = 0;
   historico = []; quadroInicio = quadro;
   primeiro = null; coroaAnim = 0;
+  perdaAcum = { dreno: 0, gelo: 0 }; perdaEspera = { dreno: 0, gelo: 0 };
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
   buraco.enjoo = 0; buraco.surpresa = 0; buraco.fervor = 0;
@@ -1565,7 +1571,7 @@ function trombada(a, b, ux, uy) {
   if (perdedor.imune > 0) return;               // escudo segura a conta também
   const quantas = Math.min(CFG.COLISAO_ESTRELAS, perdedor.comidas);
   if (quantas <= 0) return;
-  perderEstrelas(perdedor, quantas);
+  perderEstrelas(perdedor, quantas, "trombada");
   for (let k = 0; k < quantas; k++) estrelas.push(estrelaSolta(perdedor, k, quantas));
 }
 
@@ -2129,6 +2135,7 @@ function passoParticulas() {
   if (aberr > 0) aberr--;
   if (arco > 0) arco--;
   if (esperaColisao > 0) esperaColisao--;
+  passoPerdas();
 }
 
 
@@ -2195,7 +2202,25 @@ function subiuDeNivel(dono) {
 
 /* Perder massa: sai do contador e volta do progresso, devolvendo nível se
    preciso — senão a trombada seria só um número piscando. */
-function perderEstrelas(dono, n) {
+/* Junta as estrelas que o inimigo tirou de você e solta o total quando ele
+   para. `CFG.PERDA_ESPERA` é a janela: hits dentro dela contam como a mesma
+   investida. */
+function anotarPerda(origem, n) {
+  perdaAcum[origem] += n;
+  perdaEspera[origem] = CFG.PERDA_ESPERA;
+}
+
+function passoPerdas() {
+  for (const k in perdaEspera) {
+    if (perdaEspera[k] <= 0) continue;
+    if (--perdaEspera[k] > 0) continue;
+    if (perdaAcum[k] > 0)
+      anunciar("-" + perdaAcum[k], k === "dreno" ? COR.roxo : COR.bloco[3]);
+    perdaAcum[k] = 0;
+  }
+}
+
+function perderEstrelas(dono, n, origem) {
   // O escudo de Netuno é o único ponto que precisa saber de imunidade: tudo
   // que tira estrela passa por aqui — bloco de gelo, dreno e trombada
   if (dono.imune > 0) {
@@ -2203,7 +2228,14 @@ function perderEstrelas(dono, n) {
     if (dono === buraco) flashAzul = Math.max(flashAzul, 12);
     return;
   }
+  const antes = dono.comidas;
   dono.comidas = Math.max(0, dono.comidas - n);
+  // só o que sai de VOCÊ vira aviso; o resto o placar já conta
+  if (dono === buraco && origem && antes > dono.comidas) {
+    const tirou = antes - dono.comidas;
+    if (origem === "trombada") anunciar("-" + tirou, COR.disco[6]);
+    else anotarPerda(origem, tirou);
+  }
   if (!CFG.COLISAO_CUSTA_NIVEL) return;
   let resta = n;
   while (resta > 0) {
@@ -2322,7 +2354,7 @@ function passoBlocos(L) {
     if (Math.hypot(g.x - vitima.x, g.y - vitima.y) < rv + rr) {
       if (escudou(vitima, g.x, g.y)) { blocos.splice(i, 1); continue; }
       const quantas = Math.min(CFG.SATURNO_DANO, vitima.comidas);
-      if (quantas > 0) perderEstrelas(vitima, quantas);
+      if (quantas > 0) perderEstrelas(vitima, quantas, "gelo");
       vitima.pulso = 1; vitima.boca = 14;
       vitima.surpresa = Math.max(vitima.surpresa, 18);
       // levar tiro sacode mais do que acertar: o baque é de quem apanha
@@ -2364,7 +2396,7 @@ function puxarPlanetas() {
    ele ver que está perdendo) e viaja até o jogador, que só marca o ponto
    quando ela chega. É o trajeto que conta a história. */
 function arrancarEstrela(de, vitima) {
-  perderEstrelas(vitima, 1);
+  perderEstrelas(vitima, 1, "dreno");
   vitima.pulso = 1;
   vitima.boca = 14;
   vitima.surpresa = Math.max(vitima.surpresa, 20);
@@ -2842,11 +2874,30 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   if (p.enjoo > 0) {
     paleta = COR.discoV;
     const q = Math.min(1, p.enjoo / 40);
-    // três ondas escalonadas: uma sai, a seguinte já está no meio do caminho
+    /* Três ondas escalonadas: uma sai, a seguinte já está no meio do caminho.
+       Elas NÃO são círculos — o raio varia com o ângulo por duas senoides, e
+       o desenho inteiro vai girando conforme se afasta. Círculo perfeito lê
+       como sinal de rádio; torto e torcido lê como mal-estar, que é o que o
+       cometa causa. */
     for (let i = 0; i < 3; i++) {
       const t = ((quadro * 0.017 + i / 3) % 1);
-      ctx.globalAlpha = 0.3 * (1 - t) * q;
-      anel(bx, by, r + 2 + t * (r * 0.9 + 12), 2 + t * 2, COR.enjoo);
+      const base = r + 2 + t * (r * 0.9 + 14);
+      const torce = t * 2.2 + quadro * 0.02;     // gira enquanto abre
+      const esp = 2 + t * 2;
+      ctx.globalAlpha = 0.32 * (1 - t) * q;
+      // 6,5 por unidade de raio dá ~1 px de espaço entre pontos; com menos
+      // a onda sai pontilhada em vez de traçada
+      const passos = Math.max(40, Math.ceil(base * 6.5));
+      for (let k = 0; k < passos; k++) {
+        const a = (k / passos) * Math.PI * 2;
+        const ondula = 1 + 0.2 * Math.sin(a * 3 + torce * 2.4)
+                         + 0.12 * Math.sin(a * 5 - torce * 1.7)
+                         + 0.07 * Math.sin(a * 8 + torce * 3.1);
+        const rr = base * ondula;
+        for (let e = 0; e < esp; e++)
+          px(bx + Math.cos(a + torce) * (rr + e), by + Math.sin(a + torce) * (rr + e),
+             COR.enjoo);
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -3037,9 +3088,10 @@ function desenharBuraco() {
    o símbolo que já está na cabeça dele liga as duas leituras sem legenda. */
 const COROA_HUD = ["#.#.#", "#####", ".###."];
 function desenharCoroaHUD(x, y, cor) {
-  const bal = Math.sin(quadro * 0.09) < 0 ? 0 : -1;   // um pulinho de 1 px
-  carimbo(COROA_HUD, x + 2, y + bal, COR.coroa[2]);
-  carimbo(COROA_HUD, x + 2, y + bal - 1, COR.coroa[1]);
+  // parada de propósito: quem flutua é a coroa do boneco em campo. No placar
+  // ela é um rótulo, e rótulo que mexe compete com o jogo pela atenção
+  carimbo(COROA_HUD, x + 2, y, COR.coroa[2]);
+  carimbo(COROA_HUD, x + 2, y - 1, COR.coroa[1]);
 }
 
 /* A coroa do líder. Ela flutua (não encosta na cabeça), balança devagar e,
