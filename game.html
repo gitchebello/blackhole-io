@@ -188,7 +188,6 @@ const CFG = {
    CFG.ESCURO troca entre as duas. Tudo no jogo lê de COR, então a troca
    é de uma linha — mas as nebulosas são geradas na abertura, então mudar
    em tempo de execução exige regerar as camadas. */
-let coresPintadas = -1;      // com quantas cores as camadas atuais foram feitas
 const PALETAS = {
   claro: {
     vazio:  "#fdf7fa",                                  // o céu agora é branco
@@ -274,16 +273,11 @@ const PALETAS = {
      quem tem intensidade é quem brilha. */
   escuro: {
     vazio:  "#07050e",
-    /* No escuro as nuvens são BRANCAS. Dessaturar apaga a associação de cor
-       com cada jogador, mas em troca o campo vira nebulosa de verdade — gás
-       claro sobre o vazio — e as cores do jogo ficam todas nos personagens.
-       As quatro rampas continuam existindo por causa do reparte que evita
-       vizinhas iguais; elas é que passaram a ser iguais. */
-    nebs: [["#100e18","#1e1b28","#332f42","#565064","#8b8496","#d8d2e2"],
-           ["#100e18","#1e1b28","#332f42","#565064","#8b8496","#d8d2e2"],
-           ["#100e18","#1e1b28","#332f42","#565064","#8b8496","#d8d2e2"],
-           ["#100e18","#1e1b28","#332f42","#565064","#8b8496","#d8d2e2"]],
-    poeira:["#1b1826","#241f31","#2e293d"],
+    nebs: [["#1a0c18","#331330","#5c1e4d","#932c74","#cf4499","#ff6fc0"],   // rosa
+           ["#0a1020","#12233f","#1c3f6e","#2a66a6","#3f97d6","#6ec6f5"],   // azul
+           ["#08201b","#0d3830","#125349","#1a7a68","#26a88d","#43d6b4"],   // verde
+           ["#221708","#3d2a0f","#5e4318","#8a6524","#bb8d33","#f0bb52"]],  // amarelo
+    poeira:["#171225","#1f1830","#28203c"],
     estrela:"#ffffff",
     estrelaSuave:"#9c90b4",
     disco: ["#2a0f22","#48173a","#6b2154","#912f72","#c04490","#e75fae","#ff7cc4","#ffa8d8"],
@@ -344,17 +338,11 @@ const PALETAS = {
     painel: "#140f22"
   }
 };
-/* `let`, não `const`: o botão do menu troca a paleta em tempo de execução.
-   Só as nebulosas dependem dela na abertura (os sprites dos planetas usam
-   cores literais), então trocar de tema é reatribuir COR e regerar as
-   camadas de nuvem. */
-let COR = CFG.ESCURO ? PALETAS.escuro : PALETAS.claro;
-function aplicarTema(escuro) {
-  CFG.ESCURO = escuro;
-  COR = escuro ? PALETAS.escuro : PALETAS.claro;
-  coresPintadas = -1;                    // força o refazimento das camadas
-  gerarCamadas();
-}
+/* A paleta escura fica no arquivo, dormente: `CFG.ESCURO` decide qual vale,
+   e a troca acontece na abertura. Não há mais botão para alternar em tempo de
+   execução — se voltar a ter, é preciso reatribuir COR e regerar as camadas de
+   nuvem, que são a única coisa cozida com a paleta no carregamento. */
+const COR = CFG.ESCURO ? PALETAS.escuro : PALETAS.claro;
 
 /* ── fonte pixel 5x7 (a 8a linha guarda as descidas de g, j, p, q, y) ── */
 const FONTE_H = 8;
@@ -684,7 +672,7 @@ function pintarNebulosa(escala) {
 /* uma camada por degrau de zoom, da mais próxima à mais afastada */
 const CAMADAS = [];
 const N_CAMADAS = 4;
-// `coresPintadas` é declarada lá em cima, junto de aplicarTema
+let coresPintadas = -1;      // com quantas cores as camadas atuais foram feitas
 
 /* As camadas são caras de gerar, então só voltam ao forno quando o número de
    cores muda de verdade — e não a cada clique no seletor de oponentes. */
@@ -1298,7 +1286,6 @@ tela.addEventListener("pointerdown", e => {
         reiniciar();                   // e recoloca os bonecos já no menu
         return;
       }
-    if (dentro(gx, gy, botaoEscuro(), 5)) { aplicarTema(!CFG.ESCURO); return; }
     if (dentro(gx, gy, botaoJogar(), 6)) jogar();
     return;
   }
@@ -3546,13 +3533,6 @@ function botaoOponente(i) {
   return { x: x0 + i * (l + esp), y: b.y + b.a + 16, l: l, a: 18 };
 }
 
-/* interruptor do modo escuro, abaixo da linha de oponentes */
-function botaoEscuro() {
-  const l = 74, a = 16;
-  const b0 = botaoOponente(0);
-  return { x: Math.round((VL - l) / 2), y: b0.y + b0.a + 10, l: l, a: a };
-}
-
 function desenharMenu() {
   ctx.globalAlpha = 0.55;
   ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
@@ -3580,20 +3560,6 @@ function desenharMenu() {
           bo.y + Math.round((bo.a - FONTE_H) / 2) + 1,
           escolhido ? cor : COR.hudFraco, 1);
   }
-
-  /* modo escuro */
-  const be = botaoEscuro();
-  caixa(be, COR.painel, CFG.ESCURO ? COR.disco[5] : COR.hudFraco);
-  const rotE = "escuro";
-  const larE = larguraTexto(rotE, 1);
-  texto(rotE, be.x + 6, be.y + Math.round((be.a - FONTE_H) / 2), 
-        CFG.ESCURO ? COR.hud : COR.hudFraco, 1);
-  // chavinha: o quadradinho desliza de um lado para o outro
-  const cx0 = be.x + be.l - 22, cy0 = be.y + 4;
-  ctx.fillStyle = COR.borda;  ctx.fillRect(cx0, cy0, 16, 8);
-  ctx.fillStyle = COR.vazio;  ctx.fillRect(cx0 + 1, cy0 + 1, 14, 6);
-  ctx.fillStyle = CFG.ESCURO ? COR.disco[5] : COR.hudFraco;
-  ctx.fillRect(cx0 + (CFG.ESCURO ? 8 : 1), cy0 + 1, 7, 6);
 
   const b = botaoJogar();
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
