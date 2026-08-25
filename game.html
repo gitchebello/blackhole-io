@@ -86,13 +86,17 @@ const CFG = {
 
   /* Terra */
   TERRA_RAIO: 8,         // raio aparente da Terra, na tela
+  /* A Terra é a ÚNICA que continua em 10s. Os outros quatro subiram para
+     25s: com os cinco em 10s havia sempre planeta em cena, e o que devia ser
+     um achado virava paisagem. O turbo é o poder que só ajuda a andar, então
+     é o que pode aparecer sempre sem virar bagunça. */
   TERRA_ESPERA: 600,     // quadros até uma nova Terra aparecer (600 = 10s)
   TERRA_TURBO: 600,      // duração do turbo (600 = 10s)
   TERRA_FATOR: 1.5,      // multiplicador de velocidade do turbo
 
   /* Marte — o planeta vermelho: vira ímã por um tempo */
   MARTE_RAIO: 8,         // do mesmo tamanho da Terra
-  MARTE_ESPERA: 600,     // mesma frequência da Terra (600 = 10s)
+  MARTE_ESPERA: 1500,    // 25s; só a Terra ficou em 10s (ver TERRA_ESPERA)
   MARTE_IMA: 300,        // duração do ímã (300 = 5s)
   MARTE_ALCANCE: 1.35,   // quanto o alcance de sucção estica no ímã
   MARTE_FORCA: 1,        // sem puxão extra: esticar o alcance já reforça o perto
@@ -100,10 +104,10 @@ const CFG = {
 
   /* Saturno — o dos anéis: vira uma torre de gelo por um tempo */
   SATURNO_RAIO: 8,
-  SATURNO_ESPERA: 600,   // mesma frequência da Terra e de Marte (600 = 10s)
+  SATURNO_ESPERA: 1500,  // 25s
   SATURNO_TIRO: 480,     // duração do poder (480 = 8s)
   SATURNO_CADENCIA: 40,  // quadros entre um bloco e o outro
-  SATURNO_DANO: 1,       // estrelas que o oponente perde por bloco
+  SATURNO_DANO: 2,       // estrelas que o oponente perde por bloco
   SATURNO_VEL: 2.8,      // velocidade do bloco, em pixels de tela
   SATURNO_MIRA: 0.022,   // correção de rumo por quadro: persegue de leve.
                          // Em 0,055 o bloco virava teleguiado e acertava 90%
@@ -114,7 +118,7 @@ const CFG = {
 
   /* Júpiter — o gigante roxo: rouba estrelas de perto */
   JUPITER_RAIO: 8,
-  JUPITER_ESPERA: 600,   // mesma frequência dos outros planetas
+  JUPITER_ESPERA: 1500,  // 25s
   JUPITER_DRENO: 600,    // duração do poder (600 = 10s)
   JUPITER_RITMO: 20,     // 3 estrelas por segundo
   JUPITER_FOLGA: 6,      // basta o rival estar na tela; a folga é a margem
@@ -122,7 +126,7 @@ const CFG = {
 
   /* Netuno — o azul profundo: escudo total por um tempo */
   NETUNO_RAIO: 8,
-  NETUNO_ESPERA: 600,    // mesma frequência dos outros planetas
+  NETUNO_ESPERA: 1500,   // 25s
   NETUNO_IMUNE: 600,     // 10s sem levar golpe nenhum
   NETUNO_CLARAO: 26,
 
@@ -174,7 +178,7 @@ const CFG = {
   CADENTE_RAIO: 7,
 
   /* cometa: o de rabo verde, que deixa enjoado quem encostar */
-  COMETA_INTERVALO: 360,   // 360 quadros = 6 segundos
+  COMETA_INTERVALO: 660,   // 660 quadros = 11 segundos
   COMETA_VEL: 2.5,         // mais devagar que a cadente: dá para desviar
   COMETA_RAIO: 14,        // bem maior que a cadente: é obstáculo, não prêmio
   COMETA_ENJOO: 300,        // duração do enjoo (300 = 5s)
@@ -201,7 +205,10 @@ const CFG = {
   ESPIRAL_PUXA: 0.055,    // e o quanto ela é sugada para o centro
   RAIO_ANALOG: 22,
   ESCURO: false,          // paleta escura inteira (dormente)
-  FUNDO_PB: false,        // só o cenário em preto e branco; o resto mantém a cor
+  /* O escuro é o modo PADRÃO. O jogo é sobre um buraco negro no espaço: o
+     céu claro sempre foi a exceção simpática, não o ponto de partida. Quem
+     preferir o claro troca no botão de sol do menu. */
+  FUNDO_PB: true,         // só o cenário em preto e branco; o resto mantém a cor
   SEMENTE: 20260823
 };
 
@@ -391,12 +398,13 @@ const COR = CFG.ESCURO ? PALETAS.escuro : PALETAS.claro;
    a camada de nebulosa continua sendo gerada mas sai lisa — um fundo chapado.
    Sem estrutura extra: o resto do jogo nem sabe que elas sumiram. */
 const CEU_PB = "#000000";
-/* Rampa de 6 degraus da nebulosa no escuro. Os dois primeiros são o próprio
-   céu: é o que ENCOLHE a nuvem, porque a franja rala — que no claro ocupa a
-   maior parte da mancha — simplesmente não é pintada, e só o miolo aparece.
-   O topo para num cinza-branco fosco: no all black puro dava para se perder
-   sem nenhum ponto de referência, mas nuvem clara demais rouba o fundo. */
-const NUVEM_PB = [CEU_PB, CEU_PB, "#0d0d12", "#16161d", "#22222b", "#33333e"];
+/* Rampa de 6 degraus da nebulosa no escuro. Só o PRIMEIRO é o céu puro: é
+   ele que encolhe a nuvem, porque a franja rala — que no claro ocupa a maior
+   parte da mancha — não chega a ser pintada. Com dois degraus apagados a
+   nuvem virava uma ilha com beirada dura; com um, ela tem para onde desbotar
+   e volta a parecer gás. O topo para num cinza-branco fosco: no all black
+   puro dava para se perder, mas nuvem clara demais rouba o fundo. */
+const NUVEM_PB = [CEU_PB, "#0a0a10", "#13131b", "#1e1e28", "#2c2c39", "#41414f"];
 const FUNDO_PB = {
   vazio:  CEU_PB,
   /* O CORPO do personagem vira preto e o traço do rosto vira branco. É a
@@ -421,6 +429,11 @@ const FUNDO_PB = {
 /* guarda o que estava valendo, para conseguir voltar */
 const FUNDO_ORIGINAL = {};
 for (const k in FUNDO_PB) FUNDO_ORIGINAL[k] = COR[k];
+/* Entra já no escuro, sem passar por aplicarFundo(): ela mexe em
+   `coresPintadas`, que só é declarado bem mais abaixo — daqui daria erro de
+   acesso antes da inicialização. As nuvens ainda não foram cozidas neste
+   ponto, então basta trocar a paleta e deixar o gerarCamadas() de sempre. */
+if (CFG.FUNDO_PB) for (const k in FUNDO_PB) COR[k] = FUNDO_PB[k];
 
 function aplicarFundo(pb) {
   CFG.FUNDO_PB = pb;
@@ -891,13 +904,25 @@ const jupiterSprite = fazerPlaneta(CFG.JUPITER_RAIO, [
   return [0, (f > 0.3 && f < 0.62) ? 1 : 0];
 });
 
-/* Saturno: uma faixa suave, e o anel faz o resto */
+/* Saturno: antes era UMA faixa e o anel fazia todo o trabalho — o corpo saía
+   liso feito bola de bilhar. Agora são quatro faixas em degrau, espelhadas no
+   equador e ficando mais escuras na direção dos polos, que é como o gigante
+   gasoso realmente se lê: listras paralelas, não manchas. Como são degraus da
+   MESMA rampa (e não paletas diferentes), elas acompanham o sombreamento da
+   esfera em vez de cortar a bola com linhas retas. */
 const SAT_D = CFG.SATURNO_RAIO * 2 + 1;
 const saturnoSprite = fazerPlaneta(CFG.SATURNO_RAIO, [
-  ["#fffcee","#fbe7b6","#e8c47e","#bb9250","#6f5027"]
+  ["#fffdf2","#ffeec2","#f0cf8b","#c79a55","#7a5828"]
 ], (nx, ny) => {
-  const f = Math.abs(ny + 0.05 * Math.sin(nx * 2.2));
-  return [0, (f > 0.26 && f < 0.58) ? 1 : 0];
+  const f = Math.abs(ny + 0.055 * Math.sin(nx * 2.2));
+  /* Nenhuma faixa desce dois degraus: com a calota escura demais o polo
+     afundava no céu preto e a bola parecia CORTADA em cima — o mesmo achatado
+     que já tinha sido reclamado antes. As listras alternam um degrau só, e
+     quem fecha a silhueta é o contorno desenhado por fora. */
+  if (f > 0.62) return [0, 1];
+  if (f > 0.42) return [0, 0];          // faixa clara larga
+  if (f > 0.24) return [0, 1];
+  return [0, 0];                        // banda equatorial, a mais clara
 });
 
 /* Netuno: faixa em degrau e uma mancha escura */
@@ -910,6 +935,25 @@ const netunoSprite = fazerPlaneta(CFG.NETUNO_RAIO, [
   const f = Math.abs(ny + 0.05 * Math.sin(nx * 2.4));
   return [0, (f > 0.32 && f < 0.64) ? 1 : 0];
 });
+
+/* Losango cheio girando: percorre a caixa do desenho e desgira cada pixel
+   para saber se ele cai dentro do quadrado inclinado. É barato porque a caixa
+   tem 9 px de lado, e só há um punhado de blocos em cena. */
+function cristal(cx, cy, r, giro) {
+  const co = Math.cos(-giro), si = Math.sin(-giro);
+  const x0 = Math.round(cx), y0 = Math.round(cy);
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const u = dx * co - dy * si, v = dx * si + dy * co;
+      const d = Math.max(Math.abs(u), Math.abs(v));
+      if (d > r) continue;
+      // aresta escura por fora, corpo claro dentro, lasco branco no canto alto
+      const cor = d > r - 1 ? COR.bloco[3]
+                : (u + v < -r * 0.55 ? COR.bloco[0] : COR.bloco[1]);
+      px(x0 + dx, y0 + dy, cor);
+    }
+  }
+}
 
 /* ── desenho em pixel cheio (sem antialias) ──────────────────── */
 function disco(cx, cy, raio, cor) {
@@ -1231,6 +1275,8 @@ let primeiro = null;    // quem está com mais estrelas; ganha a coroa
    pouco em pouco — anunciar cada estrela viraria um piscar sem sentido —,
    então acumulam e o total sai quando a agressão para. */
 let perdaAcum = { dreno: 0, gelo: 0 };
+let perdaParada = { dreno: 0, gelo: 0 };   // quadros desde o último golpe
+let ganhoParado = 0;
 let ganhoDreno = 0;     // o que VOCÊ tirou dos outros no dreno
 let coroaAnim = 0;      // 1 no instante em que a coroa troca de cabeça
 const cam = { x: 0, y: 0 };
@@ -1366,6 +1412,7 @@ function reiniciar() {
   historico = []; quadroInicio = quadro;
   primeiro = null; coroaAnim = 0;
   perdaAcum = { dreno: 0, gelo: 0 };
+  perdaParada = { dreno: 0, gelo: 0 }; ganhoParado = 0;
   ganhoDreno = 0;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
@@ -2536,42 +2583,45 @@ function subiuDeNivel(dono) {
 
 /* Perder massa: sai do contador e volta do progresso, devolvendo nível se
    preciso — senão a trombada seria só um número piscando. */
-/* Junta as estrelas que o inimigo tirou de você. O total sai quando o PODER
-   DELE acaba, não quando ele para de acertar: sair do alcance por um segundo
-   fechava a conta no meio e o jogador recebia dois ou três avisos por uma
-   ativação só. */
+/* Junta as estrelas que saem de você e fecha a conta quando o FLUXO PARA —
+   não quando o poder do rival acaba. Fugir do alcance é a jogada certa, e
+   quem fugiu tem de saber logo quanto custou; esperar os 8 ou 10 segundos do
+   poder inteiro para ser avisado deixava a informação chegar quando ela já
+   não servia para decidir nada.
+
+   O que evita o troco-miúdo (um aviso por bloco) não é esperar o poder: é a
+   carência abaixo. Ela tem de ser MAIOR que o intervalo entre dois golpes da
+   mesma fonte, senão a conta fecha no vão entre um e outro. */
+const PERDA_CARENCIA = { dreno: 34, gelo: 58 };   // ritmo 20 e cadência 40
 function anotarPerda(origem, n) {
   perdaAcum[origem] += n;
+  perdaParada[origem] = 0;
 }
 
-/* algum rival ainda está com o poder ligado, ou com coisa a caminho? */
-function dreanandoAlguem() {
-  return rivais.some(r => r.dreno > 0) ||
-         roubadas.some(e => e.para !== buraco);
-}
-function atirandoAlguem() {
-  return rivais.some(r => r.tiro > 0) ||
-         blocos.some(g => g.alvo === buraco);
+/* ainda tem coisa a caminho de mim? enquanto houver, a conta não fecha */
+const drenoVindo = () => roubadas.some(e => e.para !== buraco);
+const geloVindo  = () => blocos.some(g => g.alvo === buraco);
+
+function fecharPerda(origem, vindo, cor) {
+  if (perdaAcum[origem] <= 0) return;
+  if (vindo()) { perdaParada[origem] = 0; return; }
+  if (++perdaParada[origem] < PERDA_CARENCIA[origem]) return;
+  anunciar("-" + perdaAcum[origem], cor);
+  SFX.perda();
+  perdaAcum[origem] = 0;
 }
 
 function passoPerdas() {
-  // o que VOCÊ absorveu: fecha quando o seu dreno acaba e a última estrela
-  // roubada já chegou — elas ainda estão voando quando o tempo zera
-  if (ganhoDreno > 0 && buraco.dreno <= 0 &&
-      !roubadas.some(e => e.para === buraco)) {
-    anunciar("+" + ganhoDreno + "!", COR.roxo);
-    ganhoDreno = 0;
+  // o que VOCÊ absorveu fecha pela mesma regra: parou de entrar, anuncia
+  if (ganhoDreno > 0) {
+    if (roubadas.some(e => e.para === buraco)) ganhoParado = 0;
+    else if (++ganhoParado >= PERDA_CARENCIA.dreno) {
+      anunciar("+" + ganhoDreno + "!", COR.roxo);
+      ganhoDreno = 0;
+    }
   }
-  if (perdaAcum.dreno > 0 && !dreanandoAlguem()) {
-    anunciar("-" + perdaAcum.dreno, COR.roxo);
-    SFX.perda();
-    perdaAcum.dreno = 0;
-  }
-  if (perdaAcum.gelo > 0 && !atirandoAlguem()) {
-    anunciar("-" + perdaAcum.gelo, COR.bloco[3]);
-    SFX.perda();
-    perdaAcum.gelo = 0;
-  }
+  fecharPerda("dreno", drenoVindo, COR.roxo);
+  fecharPerda("gelo", geloVindo, COR.bloco[3]);
 }
 
 function perderEstrelas(dono, n, origem) {
@@ -2823,7 +2873,7 @@ function passoRoubadas() {
       ganharEstrelas(p, 1);
       // o total é contado na CHEGADA, não no arranque: as últimas estrelas
       // ainda estão voando quando o poder acaba, e elas contam
-      if (p === buraco) { ganhoDreno++; SFX.dreno(); }
+      if (p === buraco) { ganhoDreno++; ganhoParado = 0; SFX.dreno(); }
       p.pulso = 1; p.boca = 16;
       aneis.push({ x: p.x, y: p.y, r: 2, vida: 14, total: 14, rival: p !== buraco, pal: p !== buraco ? paletaDe(p).disco : null });
       faiscar(p.x, p.y, 8, 3, 8);
@@ -2944,9 +2994,11 @@ function anelSaturno(cx, cy, R, frente) {
   const incl = 0.9;                              // cisalhamento por linha
   const S = COR.saturno;
   // o anel tem que destoar do corpo: com tons vizinhos ele derrete no planeta
-  const faixas = [[1, 0.9, S[5]],                // borda externa, fina e fosca
-                  [0.88, 0.72, S[3]],            // faixa A, a mais clara
-                  [0.66, 0.44, S[4]]];           // faixa B, depois do vão
+  const faixas = [[1, 0.91, S[5]],               // borda externa, fina e fosca
+                  [0.89, 0.68, S[1]],            // faixa A: quase branca
+                  [0.6, 0.34, S[3]]];            // faixa B, depois do vão
+  // A divisão de Cassini (o vão entre A e B) é o que faz o anel parecer anel e
+  // não um disco borrado. Ela ficou mais larga: 0,68 → 0,6
   const topo = Math.ceil(ry);
   for (let dy = -topo; dy <= topo; dy++) {
     if ((dy >= 0) !== frente) continue;
@@ -3200,16 +3252,11 @@ function desenharMundo() {
     const pul = 0.5 + 0.5 * Math.sin(quadro * 0.3 + g.giro);
     brilho(gx, gy, CFG.SATURNO_RAIO_BLOCO,
            CFG.SATURNO_RAIO_BLOCO + 5 + pul * 2, COR.bloco[2], 0.3 + pul * 0.2, 2);
-    // quadradinho girando: bloco de gelo, não bolinha
-    const c1 = Math.cos(g.giro), s1 = Math.sin(g.giro);
-    const L2 = CFG.SATURNO_RAIO_BLOCO;
-    for (const [ux, uy] of [[-1,-1],[1,-1],[1,1],[-1,1]]) {
-      const qx = gx + (ux * c1 - uy * s1) * L2;
-      const qy = gy + (ux * s1 + uy * c1) * L2;
-      px(qx, qy, COR.bloco[3]);
-    }
-    disco(gx, gy, L2 - 1, COR.bloco[0]);
-    px(gx, gy, COR.bloco[2]);
+    /* CRISTAL maciço: um losango cheio, com aresta escura e um lasco de luz
+       em cima. O desenho antigo era um disco com quatro pixels soltos nas
+       quinas — de longe lia como bolinha, e bolinha é estrela neste jogo.
+       O que precisa ser lido em 7 px é a SILHUETA angulosa. */
+    cristal(gx, gy, CFG.SATURNO_RAIO_BLOCO + 1, g.giro);
   }
 
   /* o alcance do ímã, desenhado como um anel pontilhado que respira */
@@ -4152,9 +4199,34 @@ const ICONE_LUA = [
   "..####.......",
   "....####....."
 ];
+/* Sol: miolo maciço, quatro raios retos e quatro tocos nas diagonais. Os
+   raios saíram na mão em vez de por fórmula — em 13 px a diagonal calculada
+   sempre sai quebrada, com pixel solto no meio do vão. */
+const ICONE_SOL = [
+  "......###......",
+  "......###......",
+  "..#.........#..",
+  "...#..###..#...",
+  ".....#####.....",
+  "....#######....",
+  "##.#########.##",
+  "##.#########.##",
+  "##.#########.##",
+  "....#######....",
+  ".....#####.....",
+  "...#..###..#...",
+  "..#.........#..",
+  "......###......",
+  "......###......"
+];
+
 const ESTRELINHA = [".#.", "###", ".#."];
+/* O botão mostra PARA ONDE ele leva, não onde você está: no escuro aparece o
+   sol, que é o que acontece se apertar. Com a lua fixa nos dois estados era
+   preciso saber de cor qual dos dois acesos significava o quê. */
 function desenharIconeFundo(cx, cy, pb) {
-  const c = pb ? COR.disco[5] : COR.hudFraco;
+  const c = COR.disco[5];
+  if (pb) { carimbo(ICONE_SOL, cx, cy, c); return; }
   // +2: carimbo centraliza pela caixa, mas a massa da lua fica toda na
   // metade esquerda dela, e sem o empurrão o ícone nasce torto no botão
   carimbo(ICONE_LUA, cx + 2, cy, c);
@@ -4242,7 +4314,9 @@ function desenharMenu() {
   caixa(bs, COR.painel, SOM.ligado ? COR.disco[4] : COR.hudFraco, 2);
   desenharIconeSom(bs.x + bs.l / 2, bs.y + bs.a / 2, SOM.ligado);
   const bf = comprimir(botaoFundo(), "fundo");
-  caixa(bf, COR.painel, CFG.FUNDO_PB ? COR.disco[4] : COR.hudFraco, 2);
+  // este botão não tem "ligado" e "desligado": ele é sempre uma troca, então
+  // o contorno fica sempre aceso — quem diz o que vai acontecer é o ícone
+  caixa(bf, COR.painel, COR.disco[4], 2);
   desenharIconeFundo(bf.x + bf.l / 2, bf.y + bf.a / 2, CFG.FUNDO_PB);
 
   const b = comprimir(botaoJogar(), "jogar");
