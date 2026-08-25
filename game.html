@@ -211,6 +211,7 @@ const PALETAS = {
     blush:  "#ff9ecb",
     coracao:["#e04d8c","#f56fa4","#ffbcd6"],
     arcoiris:["#ff9ec4","#ffc39a","#ffe98a","#a8e6a1","#8fe3ef","#9fc0ff","#cba6ff"],
+    coroa:  ["#fff3c4","#ffd85c","#e0a52c"],
     cadente:["#ffe9a8","#ffd166","#f0b53f"],
     // verde-claro de propósito: o cometa era azul e se confundia com o turbo
     cometa: ["#f3fdf7","#cdf4de","#a0e7c2","#6ed4a4","#42b583"],
@@ -287,6 +288,7 @@ const PALETAS = {
     blush:  "#ff5fa8",
     coracao:["#ff7cc4","#ff9ecb","#ffc4dc"],
     arcoiris:["#ff6fb4","#ffab6a","#ffe06a","#7de08a","#5fd8ef","#7aa8ff","#b48cff"],
+    coroa:  ["#fff8db","#ffd85c","#c98a1e"],
     cadente:["#fff3c7","#ffd166","#e0a52c"],
     cometa: ["#eafff3","#9df0c4","#5fdda2","#31bd80","#1c8f5f"],
     enjoo:  "#4fc98f",
@@ -1028,6 +1030,13 @@ const OLHOS_ENJOO = [
   [".######.", "########", "########", "########", ".######."],
   ["..#####..", ".#######.", "#########", "#########", ".#######."]
 ];
+/* A coroa do primeiro lugar, em três tamanhos como o resto dos sprites:
+   um desenho só ficaria grande demais no boneco pequeno e sumiria no grande. */
+const COROAS = [
+  ["#.#.#", "#####", ".###."],
+  ["#..#..#", "#.###.#", "#######", ".#####."],
+  ["#...#...#", "#.#.#.#.#", "#########", "#########", ".#######."]
+];
 const BOCAS_O = [                          // boca de "o" na hora da mordida
   [".#.", "###", ".#."],
   [".##.", "####", "####", ".##."],
@@ -1195,6 +1204,8 @@ let zoom = 1, zoomAlvo = 1, raioTela = CFG.RAIO_BASE;
 let expansao = 0;       // 1 no instante do nível novo, decai até 0
 let historico = [];     // { t: segundos, v: [estrelas de cada um] }
 let quadroInicio = 0;   // `quadro` nunca zera; o tempo da partida sai da diferença
+let primeiro = null;    // quem está com mais estrelas; ganha a coroa
+let coroaAnim = 0;      // 1 no instante em que a coroa troca de cabeça
 const cam = { x: 0, y: 0 };
 
 /* quanto custa sair do nível n: cada nível pede mais que o anterior */
@@ -1326,6 +1337,7 @@ function reiniciar() {
   faiscas = []; coracoes = []; tremor = 0; flash = 0; flashLado = 0; aberr = 0;
   arco = 0; turbo = 0; esperaColisao = 0; expansao = 0;
   historico = []; quadroInicio = quadro;
+  primeiro = null; coroaAnim = 0;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
   buraco.enjoo = 0; buraco.surpresa = 0; buraco.fervor = 0;
@@ -1845,6 +1857,34 @@ function bafo(x, y, quantas, forca) {
    traçado ficar liso na largura que ele tem na tela, e uma partida de três
    minutos guarda só 360 amostras. */
 const PASSO_HISTORICO = 30;
+/* A coroa muda de cabeça quando alguém passa o líder. Empate NÃO troca: no
+   0 a 0 do começo, e a cada vez que dois se igualam, a coroa ficaria pulando
+   de um para o outro sem ninguém ter feito nada. */
+function verLideranca() {
+  let melhor = null;
+  for (const p of todos())
+    if (p.comidas > 0 && (!melhor || p.comidas > melhor.comidas)) melhor = p;
+  if (melhor === primeiro) return;
+  if (primeiro && melhor && melhor.comidas === primeiro.comidas) return;
+  primeiro = melhor;
+  if (!primeiro || cena !== "jogo") return;
+  coroaAnim = 1;
+  explodirEstrelas(primeiro.x, primeiro.y, 38);
+  if (primeiro === buraco) { tremor = Math.max(tremor, 8); flashLado = 24; }
+}
+
+/* estouro de estrelinhas douradas: o sinal de que a coroa mudou de dono */
+function explodirEstrelas(x, y, quantas) {
+  for (let k = 0; k < quantas; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const v = (0.7 + Math.random() * 2.1) / zoom;
+    faiscas.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                   vida: 22 + Math.floor(Math.random() * 16), arrasto: 0.945,
+                   tipo: "estrela",
+                   cor: COR.coroa[Math.floor(Math.random() * COR.coroa.length)] });
+  }
+}
+
 function anotarDesempenho() {
   if (historico.length && quadro - historico[historico.length - 1].q < PASSO_HISTORICO)
     return;
@@ -2133,6 +2173,7 @@ function passo() {
   passoRoubadas();
   if (espiral > 0.02) puxarPlanetas();
   passoParticulas();
+  verLideranca();
   anotarDesempenho();
 
   /* — câmera — */
@@ -2178,6 +2219,7 @@ function passoParticulas() {
   if (flashTiro > 0) flashTiro--;
   if (flashRoxo > 0) flashRoxo--;
   if (flashAzul > 0) flashAzul--;
+  if (coroaAnim > 0) coroaAnim = Math.max(0, coroaAnim - 0.022);
   if (buraco.imune > 0) buraco.imune--;
   for (const r of rivais) if (r.imune > 0) r.imune--;
   // a tela nunca fica parada durante o efeito: um tremor de fundo baixinho
@@ -2819,6 +2861,8 @@ function desenharMundo() {
       px(fx, fy, f.cor);
       px(fx - 1, fy, f.cor); px(fx + 1, fy, f.cor);
       px(fx, fy - 1, f.cor); px(fx, fy + 1, f.cor);
+    } else if (f.tipo === "estrela") {           // estrelinha do primeiro lugar
+      carimbo(ESTRELAS_SPR[f.vida > 22 ? 1 : 0], fx, fy, f.cor);
     } else if (f.tipo === "enjoo") {              // lasca: um X pequenininho
       px(fx, fy, f.cor);
       px(fx - 1, fy - 1, f.cor); px(fx + 1, fy + 1, f.cor);
@@ -2954,6 +2998,7 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
     ctx.globalAlpha = 1;
   }
   if (CFG.ROSTO) desenharRosto(p, bx, by, r, blush);
+  if (p === primeiro && cena !== "menu") desenharCoroa(p, bx, by, r);
 
   if (p === buraco && flash > 0 && flash % 6 < 3) {
     ctx.globalAlpha = 0.3; disco(bx, by, r + 4, paleta[6]); ctx.globalAlpha = 1;
@@ -3066,6 +3111,32 @@ function desenharBuraco() {
   }
   desenharPersonagem(buraco, raioTela,
                      COR.disco, COR.halo, COR.contorno, COR.blush, true);
+}
+
+/* A coroa do líder. Ela flutua (não encosta na cabeça), balança devagar e,
+   quando troca de dono, CAI de cima com um repique — é o movimento que
+   anuncia a virada, mais do que a coroa em si. */
+function desenharCoroa(p, bx, by, r) {
+  const t = COROAS[r < 13 ? 0 : r < 22 ? 1 : 2];
+  const bal = Math.sin(quadro * 0.075) * 1.2;
+  // entrada: vem de cima e passa do ponto antes de assentar
+  const a = coroaAnim;
+  const queda = a > 0 ? -Math.pow(a, 1.6) * (r + 26) + Math.sin(a * Math.PI) * 4 : 0;
+  const cy = by - r - 5 - t.length + bal + queda;
+  const giro = a > 0 ? Math.sin(a * Math.PI * 3) * 2 * a : 0;
+
+  ctx.globalAlpha = 0.5;                          // brilhinho por baixo
+  disco(bx + giro, cy + 1, t.length * 0.9, COR.coroa[0]);
+  ctx.globalAlpha = 1;
+  carimbo(t, bx + giro, cy + 1, COR.coroa[2]);    // sombra, meio pixel abaixo
+  carimbo(t, bx + giro, cy, COR.coroa[1]);
+
+  // faíscas ocasionais em volta, para a coroa não ficar estática
+  if (quadro % 9 === 0) {
+    const ang = Math.random() * Math.PI * 2;
+    const d = t[0].length * 0.6;
+    px(bx + giro + Math.cos(ang) * d, cy + Math.sin(ang) * d * 0.7, COR.coroa[0]);
+  }
 }
 
 /* a carinha: olhos que espiam para onde ele está indo, bochechas e um sorriso */
