@@ -677,6 +677,19 @@ const TERRA_QUADROS = 8;
 const terraSprite = document.createElement("canvas");
 terraSprite.width = TERRA_D * TERRA_QUADROS; terraSprite.height = TERRA_D;
 
+/* Luz de uma esfera, para todos os planetas usarem a mesma.
+   Duas coisas somadas: a direção da luz (alto-esquerda, como no resto do
+   jogo) e o ESCURECIMENTO DE BORDA — quanto mais perto do limbo, mais fraca a
+   luz, porque ali a superfície se inclina para longe de quem olha. É esse
+   segundo termo que faz o disco virar bola; sem ele sobra um fio escuro na
+   volta, que lê como contorno de adesivo. */
+function luzEsfera(dx, dy, R) {
+  const d = Math.min(1, Math.hypot(dx, dy) / R);
+  const borda = Math.sqrt(Math.max(0, 1 - d * d));       // 1 no meio, 0 no limbo
+  const direcao = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
+  return limitar(direcao * 0.55 + Math.pow(borda, 0.45) * 0.45, 0, 0.999);
+}
+
 /* largura da linha dy de um círculo de raio R, do jeito do disco() */
 function meiaLinha(R, dy) {
   const f = R * R - dy * dy;
@@ -699,14 +712,16 @@ function desenharSpriteTerra() {
       if (w < 0) continue;
       for (let x = c - w; x <= c + w; x++) {
         const dx = x - c;
-        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
-        const tom = luz > 0.68 ? 2 : luz > 0.36 ? 1 : 0;
+        const luz = luzEsfera(dx, dy, R);
+        const tom = luz > 0.66 ? 2 : luz > 0.4 ? 1 : 0;
         let cor;
         // o fio de contorno acompanha a linha, não o raio: fica de 1 px
         // uniforme em toda a volta em vez de engrossar em cima e embaixo
         // só a ponta de cada linha: o fio grosso em cima e embaixo é o que
         // fazia o degrau da esfera saltar aos olhos
-        const naBorda = (x === c - w || x === c + w);
+        // o limbo virou retoque só do lado escuro: do lado da luz a própria
+        // curva de brilho já fecha a bola, e o fio ali só endurecia a silhueta
+        const naBorda = (x === c - w || x === c + w) && luz < 0.52;
         if (naBorda) {
           cor = limbo;
         } else if (Math.abs(dy) > R * 0.62 && Math.abs(dx) < w * 0.5) {
@@ -756,12 +771,12 @@ function desenharSpriteMarte() {
       if (w < 0) continue;
       for (let x = c - w; x <= c + w; x++) {
         const dx = x - c;
-        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
-        const tom = luz > 0.68 ? 2 : luz > 0.36 ? 1 : 0;
+        const luz = luzEsfera(dx, dy, R);
+        const tom = luz > 0.66 ? 2 : luz > 0.4 ? 1 : 0;
         let cor;
         // só a ponta de cada linha: o fio grosso em cima e embaixo é o que
         // fazia o degrau da esfera saltar aos olhos
-        const naBorda = (x === c - w || x === c + w);
+        const naBorda = (x === c - w || x === c + w) && luz < 0.52;
         if (naBorda) {
           cor = limbo;
         } else if (dy < -R * 0.66 && Math.abs(dx) < w * 0.45) {
@@ -807,9 +822,9 @@ function desenharSpriteSaturno() {
       if (w < 0) continue;
       for (let x = c - w; x <= c + w; x++) {
         const dx = x - c;
-        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
+        const luz = luzEsfera(dx, dy, R);
         let cor;
-        if (x === c - w || x === c + w) {
+        if ((x === c - w || x === c + w) && luz < 0.52) {
           cor = limbo;
         } else {
           // faixas horizontais suaves, que é o que Saturno tem de marcante
@@ -848,9 +863,9 @@ function desenharSpriteJupiter() {
       if (w < 0) continue;
       for (let x = c - w; x <= c + w; x++) {
         const dx = x - c;
-        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
+        const luz = luzEsfera(dx, dy, R);
         let cor;
-        if (x === c - w || x === c + w) {
+        if ((x === c - w || x === c + w) && luz < 0.52) {
           cor = J[5];
         } else {
           const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
@@ -892,9 +907,9 @@ function desenharSpriteNetuno() {
       if (w < 0) continue;
       for (let x = c - w; x <= c + w; x++) {
         const dx = x - c;
-        const luz = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
+        const luz = luzEsfera(dx, dy, R);
         let cor;
-        if (x === c - w || x === c + w) {
+        if ((x === c - w || x === c + w) && luz < 0.52) {
           cor = N[4];
         } else {
           const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
@@ -1006,6 +1021,27 @@ const CORACOES = [
   [".#.#.", "#####", "#####", ".###.", "..#.."],
   [".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."]
 ];
+
+/* Brilho radial: discos concêntricos do maior para o menor, todos com a
+   MESMA opacidade baixa. O que empilha é a quantidade — perto do planeta
+   passam todos os discos, na ponta passa um só —, e é isso que dá a queda
+   suave até zerar.
+   Feito com anéis de 1 px, a luz saía com um cruzeiro de raios: anel fino
+   cobre número diferente de pixels no topo e na lateral, e a sobra desenha
+   eixos. Disco cheio é o mesmo rasterizador do resto do jogo e não tem essa
+   costura.
+   `curva` alta aperta a luz contra o planeta; 1 dá rampa reta. */
+function brilho(cx, cy, r0, r1, cor, forca, curva) {
+  const n = Math.max(2, Math.round((r1 - r0) * 1.6));
+  const a = forca / n;
+  const k = curva || 2;
+  ctx.globalAlpha = a;
+  for (let i = n; i >= 1; i--) {
+    const t = i / n;
+    disco(cx, cy, r0 + (r1 - r0) * Math.pow(t, k), cor);
+  }
+  ctx.globalAlpha = 1;
+}
 
 function anel(cx, cy, raio, esp, cor) {        // rosca preenchida, sem antialias
   ctx.fillStyle = cor;
@@ -2514,14 +2550,11 @@ function desenharMundo() {
     const x = Math.round(paraTelaX(terra.x)) - CFG.TERRA_RAIO;
     const y = Math.round(paraTelaY(terra.y)) - CFG.TERRA_RAIO;
     if (x > -TERRA_D && y > -TERRA_D && x < VL && y < VA) {
-      // glow azul em camadas, respirando devagar
+      // camada fina de brilho, apagando para fora, respirando devagar
       const cxT2 = x + CFG.TERRA_RAIO, cyT2 = y + CFG.TERRA_RAIO;
       const pT = 0.5 + 0.5 * Math.sin(quadro * 0.055);
-      for (let k = 4; k >= 1; k--) {
-        ctx.globalAlpha = (0.065 + pT * 0.04) * k / 4;
-        disco(cxT2, cyT2, CFG.TERRA_RAIO + k * 2.1 + pT * 1.6, COR.glowTerra);
-      }
-      ctx.globalAlpha = 1;
+      brilho(cxT2, cyT2, CFG.TERRA_RAIO - 1, CFG.TERRA_RAIO + 7 + pT * 2,
+             COR.glowTerra, 0.3 + pT * 0.12, 2.4);
       const q = Math.floor(terra.quadro / 7) % TERRA_QUADROS;
       ctx.drawImage(terraSprite, q * TERRA_D, 0, TERRA_D, TERRA_D, x, y, TERRA_D, TERRA_D);
     }
@@ -2532,14 +2565,11 @@ function desenharMundo() {
     const x = Math.round(paraTelaX(marte.x)) - CFG.MARTE_RAIO;
     const y = Math.round(paraTelaY(marte.y)) - CFG.MARTE_RAIO;
     if (x > -MARTE_D && y > -MARTE_D && x < VL && y < VA) {
-      // glow vermelho, mais forte que o da Terra: Marte é o planeta quente
+      // vermelho, um pouco mais forte que o da Terra: Marte é o planeta quente
       const cxM2 = x + CFG.MARTE_RAIO, cyM2 = y + CFG.MARTE_RAIO;
       const pM = 0.5 + 0.5 * Math.sin(quadro * 0.075 + 1.3);
-      for (let k = 5; k >= 1; k--) {
-        ctx.globalAlpha = (0.085 + pM * 0.055) * k / 5;
-        disco(cxM2, cyM2, CFG.MARTE_RAIO + k * 2.2 + pM * 2, COR.glowMarte);
-      }
-      ctx.globalAlpha = 1;
+      brilho(cxM2, cyM2, CFG.MARTE_RAIO - 1, CFG.MARTE_RAIO + 8 + pM * 2,
+             COR.glowMarte, 0.34 + pM * 0.14, 2.2);
       const q = Math.floor(marte.quadro / 7) % MARTE_QUADROS;
       ctx.drawImage(marteSprite, q * MARTE_D, 0, MARTE_D, MARTE_D, x, y, MARTE_D, MARTE_D);
     }
@@ -2552,11 +2582,7 @@ function desenharMundo() {
     const R = CFG.SATURNO_RAIO;
     if (cxS > -R * 3 && cyS > -R * 3 && cxS < VL + R * 3 && cyS < VA + R * 3) {
       const pS = 0.5 + 0.5 * Math.sin(quadro * 0.062 + 2.4);
-      for (let k = 4; k >= 1; k--) {            // glow dourado
-        ctx.globalAlpha = (0.07 + pS * 0.045) * k / 4;
-        disco(cxS, cyS, R + k * 2.2 + pS * 1.7, COR.glowSaturno);
-      }
-      ctx.globalAlpha = 1;
+      brilho(cxS, cyS, R - 1, R + 7 + pS * 2, COR.glowSaturno, 0.3 + pS * 0.12, 2.4);
       anelSaturno(cxS, cyS, R, false);          // metade de trás
       const q = Math.floor(saturno.quadro / 7) % SAT_QUADROS;
       ctx.drawImage(saturnoSprite, q * SAT_D, 0, SAT_D, SAT_D, cxS - R, cyS - R, SAT_D, SAT_D);
@@ -2580,11 +2606,7 @@ function desenharMundo() {
               R * (0.7 + 0.25 * Math.sin(i * 2.3)), COR.fumaca);
       }
       const pJ = 0.5 + 0.5 * Math.sin(quadro * 0.058 + 3.7);
-      for (let k = 3; k >= 1; k--) {
-        ctx.globalAlpha = (0.055 + pJ * 0.032) * k / 3;
-        disco(cxJ, cyJ, R + k * 2 + pJ * 1.4, COR.glowJupiter);
-      }
-      ctx.globalAlpha = 1;
+      brilho(cxJ, cyJ, R - 1, R + 7 + pJ * 2, COR.glowJupiter, 0.28 + pJ * 0.1, 2.4);
       const q = Math.floor(jupiter.quadro / 7) % JUP_QUADROS;
       ctx.drawImage(jupiterSprite, q * JUP_D, 0, JUP_D, JUP_D, cxJ - R, cyJ - R, JUP_D, JUP_D);
     }
@@ -2597,11 +2619,7 @@ function desenharMundo() {
     const R = CFG.NETUNO_RAIO;
     if (cxN > -R * 4 && cyN > -R * 4 && cxN < VL + R * 4 && cyN < VA + R * 4) {
       const pN = 0.5 + 0.5 * Math.sin(quadro * 0.05 + 1.9);
-      for (let k = 4; k >= 1; k--) {
-        ctx.globalAlpha = (0.075 + pN * 0.05) * k / 4;
-        disco(cxN, cyN, R + k * 2.1 + pN * 1.5, COR.glowNetuno);
-      }
-      ctx.globalAlpha = 1;
+      brilho(cxN, cyN, R - 1, R + 7 + pN * 2, COR.glowNetuno, 0.3 + pN * 0.12, 2.4);
       const q = Math.floor(netuno.quadro / 7) % NET_QUADROS;
       ctx.drawImage(netunoSprite, q * NET_D, 0, NET_D, NET_D, cxN - R, cyN - R, NET_D, NET_D);
     }
@@ -2878,10 +2896,7 @@ function desenharCometa() {
   const x = paraTelaX(cometa.x), y = paraTelaY(cometa.y);
   // a coma pulsa: cresce e encolhe, e o brilho vai junto
   const pc = 0.5 + 0.5 * Math.sin(quadro * 0.19);
-  for (let k = 4; k >= 1; k--) {
-    ctx.globalAlpha = (0.065 + pc * 0.065) * k / 4;
-    disco(x, y, R * 0.7 + k * 2.3 + pc * 2.4, COR.cometa[3]);
-  }
+  brilho(x, y, R * 0.75, R * 0.75 + 9 + pc * 3, COR.cometa[3], 0.26 + pc * 0.16, 2);
   ctx.globalAlpha = 0.5 + pc * 0.2;
   disco(x, y, R * (0.92 + pc * 0.12), COR.cometa[1]);
   ctx.globalAlpha = 1;
