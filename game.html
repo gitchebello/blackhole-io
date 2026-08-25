@@ -117,6 +117,8 @@ const CFG = {
   RIVAL_FORCA: 0.76,     // o quanto o rival acelera comparado a você
   RIVAL_MIRA: 0.4,       // erro de mira dele, em radianos
   RIVAL_PENSAR: 24,      // quadros entre uma decisão e outra
+  RIVAIS: 1,             // quantos oponentes entram em campo (1 a 3)
+  RIVAIS_MAX: 3,
   RIVAL_DISTANCIA: 2.4,  // quão perto ele chega ao caçar, em encostões
 
   /* efeito da Terra */
@@ -223,6 +225,16 @@ const PALETAS = {
     turbo:  "#4fb8e0",
     turboClarao:"#bfe4f7",
     turboPart:["#a9d2f2","#7fb9e4","#5aa4dc","#ffd98a","#ffc75c","#f0b53f"],
+    /* uma paleta por rival: eles precisam se distinguir entre si tanto quanto
+       do jogador. As três ficam longe do rosa dele e umas das outras */
+    rivais: [
+      { disco: ["#f2f8fe","#dcecfa","#c0dcf6","#9cc6f0","#78ade6","#5a93d6","#4477bc","#35619e"],
+        halo:"#c4dcf6", contorno:"#a9c6ea", blush:"#9fc8ee", marca:"#4477bc" },
+      { disco: ["#f2fdfa","#d8f5ee","#b6ebe0","#8ddccd","#63c9b6","#45ac99","#33887a","#256657"],
+        halo:"#b6ebe0", contorno:"#8ddccd", blush:"#7fd3c2", marca:"#33887a" },
+      { disco: ["#fff8ef","#ffecd4","#ffdcb0","#ffc684","#f5aa5c","#dd8c3e","#b96f2c","#8f5320"],
+        halo:"#ffdcb0", contorno:"#ffc684", blush:"#f8b877", marca:"#b96f2c" }
+    ],
     discoR: ["#f2f8fe","#dcecfa","#c0dcf6","#9cc6f0","#78ade6","#5a93d6","#4477bc","#35619e"],
     rivalHalo:"#c4dcf6",
     rivalContorno:"#a9c6ea",
@@ -278,6 +290,14 @@ const PALETAS = {
     turbo:  "#5fc8f0",
     turboClarao:"#0d2c40",
     turboPart:["#a9d2f2","#7fb9e4","#5aa4dc","#ffd98a","#ffc75c","#f0b53f"],
+    rivais: [
+      { disco: ["#0d1626","#132842","#1b4068","#245c94","#2e7ec2","#45a3e0","#6ec8f5","#a3e0ff"],
+        halo:"#2e7ec2", contorno:"#6ec8f5", blush:"#4fb0e8", marca:"#6ec8f5" },
+      { disco: ["#08211c","#0d3830","#125046","#186b5e","#219079","#2eb497","#4fd4b7","#86ebd6"],
+        halo:"#219079", contorno:"#4fd4b7", blush:"#3cc3a8", marca:"#4fd4b7" },
+      { disco: ["#2a1608","#452510","#66381a","#8c4e24","#b56a30","#d98d44","#f0af6a","#ffcf9a"],
+        halo:"#b56a30", contorno:"#f0af6a", blush:"#e09a55", marca:"#f0af6a" }
+    ],
     discoR: ["#0d1626","#132842","#1b4068","#245c94","#2e7ec2","#45a3e0","#6ec8f5","#a3e0ff"],
     rivalHalo:"#2e7ec2",
     rivalContorno:"#6ec8f5",
@@ -1036,10 +1056,20 @@ let cena = "menu";                 // "menu" | "jogo"
 const buraco = { x: 0, y: 0, vx: 0, vy: 0, ang: -Math.PI / 2,
                  nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0, atordoado: 0 };
 
-/* o rival: mesmo bicho, cor azul, cérebro simples */
-const rival = { x: 0, y: 0, vx: 0, vy: 0, ang: 0,
-                nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0, atordoado: 0,
-                alvo: null, pensar: 0 };
+/* Os rivais: mesmo bicho, cérebro simples, uma cor cada. São criados uma vez
+   só, no máximo possível, e `rivais` aponta para os que estão em campo — assim
+   nenhuma referência guardada por aí (alvo de um bloco, destino de uma estrela
+   roubada) aponta para um objeto que deixou de existir. */
+const TODOS_RIVAIS = [];
+for (let i = 0; i < CFG.RIVAIS_MAX; i++)
+  TODOS_RIVAIS.push({ x: 0, y: 0, vx: 0, vy: 0, ang: 0, indice: i,
+                      nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0,
+                      atordoado: 0, alvo: null, pensar: 0 });
+let rivais = [TODOS_RIVAIS[0]];
+const rival = TODOS_RIVAIS[0];      // atalho para o primeiro, que sempre existe
+/* todo mundo em campo, para os laços que valem para os dois lados */
+const todos = () => [buraco].concat(rivais);
+const paletaDe = r => COR.rivais[r.indice % COR.rivais.length];
 let vencedor = null;
 let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, esperaTerra = 0, turbo = 0;
 let marte = null, esperaMarte = 0, ima = 0, flashIma = 0;
@@ -1187,29 +1217,34 @@ function reiniciar() {
   arco = 0; turbo = 0; esperaColisao = 0;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
-  buraco.enjoo = 0; rival.enjoo = 0;
-  buraco.surpresa = 0; rival.surpresa = 0;
+  buraco.enjoo = 0; buraco.surpresa = 0;
   estrelas = [];
   for (let i = 0; i < alvoEstrelas(); i++) estrelas.push(novaEstrela(buraco));
-  rival.nivel = 0; rival.comidas = 0; rival.progresso = 0;
-  rival.vx = rival.vy = 0; rival.ang = Math.PI / 2;
-  rival.pulso = 0; rival.boca = 0; rival.atordoado = 0; rival.alvo = null; rival.pensar = 0;
+  rivais = TODOS_RIVAIS.slice(0, limitar(CFG.RIVAIS, 1, CFG.RIVAIS_MAX));
   const L0 = limites();
-  rival.x = limitar(buraco.x + visaoL() * 0.42, L0.x0 + 20, L0.x1 - 20);
-  rival.y = limitar(buraco.y + visaoA() * 0.28, L0.y0 + 20, L0.y1 - 20);
+  for (let i = 0; i < rivais.length; i++) {
+    const r = rivais[i];
+    r.nivel = 0; r.comidas = 0; r.progresso = 0;
+    r.vx = r.vy = 0; r.pulso = 0; r.boca = 0; r.atordoado = 0;
+    r.alvo = null; r.pensar = 0; r.enjoo = 0; r.surpresa = 0;
+    r.tiro = 0; r.recargaTiro = 0; r.dreno = 0; r.ritmoDreno = 0; r.imune = 0;
+    // espalhados em leque à mesma distância: ninguém começa com vantagem
+    const a = -Math.PI / 2 + (i + 1) / (rivais.length + 1) * Math.PI * 2;
+    r.ang = a + Math.PI;
+    r.x = limitar(buraco.x + Math.cos(a) * visaoL() * 0.44, L0.x0 + 20, L0.x1 - 20);
+    r.y = limitar(buraco.y + Math.sin(a) * visaoA() * 0.30, L0.y0 + 20, L0.y1 - 20);
+  }
   vencedor = null; flashTerra = 0;
 
   terra = novaTerra(); esperaTerra = 0;
   marte = null; esperaMarte = CFG.MARTE_ESPERA; ima = 0; flashIma = 0;
   saturno = null; esperaSaturno = CFG.SATURNO_ESPERA; flashTiro = 0; blocos = [];
-  buraco.tiro = rival.tiro = 0;
-  buraco.recargaTiro = rival.recargaTiro = 0;
+  buraco.tiro = 0; buraco.recargaTiro = 0;
   jupiter = null; esperaJupiter = CFG.JUPITER_ESPERA;
   flashRoxo = 0; drenando = false; roubadas = [];
-  buraco.dreno = rival.dreno = 0;
-  buraco.ritmoDreno = rival.ritmoDreno = 0;
+  buraco.dreno = 0; buraco.ritmoDreno = 0;
   netuno = null; esperaNetuno = CFG.NETUNO_ESPERA; flashAzul = 0;
-  buraco.imune = rival.imune = 0;
+  buraco.imune = 0;
   anuncio = null;
   cam.x = buraco.x - visaoL() / 2;
   cam.y = buraco.y - visaoA() / 2;
@@ -1237,6 +1272,12 @@ tela.addEventListener("pointerdown", e => {
   const gx = e.clientX / escala, gy = e.clientY / escala;
 
   if (cena === "menu") {
+    for (let i = 0; i < CFG.RIVAIS_MAX; i++)
+      if (dentro(gx, gy, botaoOponente(i), 5)) {
+        CFG.RIVAIS = i + 1;
+        reiniciar();                   // recoloca os bonecos já no menu
+        return;
+      }
     if (dentro(gx, gy, botaoJogar(), 6)) jogar();
     return;
   }
@@ -1343,20 +1384,22 @@ function velMaxTela() {
 
 /* O rival: escolhe o alvo mais próximo de tempos em tempos e vai atrás.
    A mira tem erro de propósito — sem isso ele é perfeito e chato. */
-function passoRival(L) {
+function passoRival(rival, L) {
   const rm = raioMundoNivel(rival.nivel);
   const zr = zoomDoNivel(rival.nivel);
 
-  // Com um poder de ataque na mão, ele para de catar estrela e vem atrás de
-  // você: o poder só rende se os dois estiverem na mesma tela, então caçar é
-  // literalmente o uso certo dele
+  // Com um poder de ataque na mão ele para de catar estrela e vai atrás de
+  // alguém: o poder só rende com os dois na mesma tela. A presa é o líder que
+  // não seja ele — atacar quem está na frente é o que mantém a corrida viva
   const caçando = rival.tiro > 0 || rival.dreno > 0;
+  const presa = caçando ? lider(rival) : null;
   const vivo = rival.alvo && (rival.alvo === terra || rival.alvo === marte ||
                               rival.alvo === saturno || rival.alvo === jupiter ||
-                              rival.alvo === buraco || rival.alvo === netuno ||
+                              rival.alvo === netuno || rival.alvo === buraco ||
+                              rivais.indexOf(rival.alvo) >= 0 ||
                               estrelas.indexOf(rival.alvo) >= 0);
-  if (caçando) {
-    rival.alvo = buraco;
+  if (caçando && presa) {
+    rival.alvo = presa;
     rival.pensar = 1;
   } else if (--rival.pensar <= 0 || !vivo) {
     rival.pensar = CFG.RIVAL_PENSAR + Math.floor(Math.random() * CFG.RIVAL_PENSAR);
@@ -1365,11 +1408,8 @@ function passoRival(L) {
       const d = Math.hypot(e.x - rival.x, e.y - rival.y);
       if (d < md) { md = d; melhor = e; }
     }
-    if (terra && Math.hypot(terra.x - rival.x, terra.y - rival.y) < md * 1.3) melhor = terra;
-    if (marte && Math.hypot(marte.x - rival.x, marte.y - rival.y) < md * 1.3) melhor = marte;
-    if (saturno && Math.hypot(saturno.x - rival.x, saturno.y - rival.y) < md * 1.3) melhor = saturno;
-    if (jupiter && Math.hypot(jupiter.x - rival.x, jupiter.y - rival.y) < md * 1.3) melhor = jupiter;
-    if (netuno && Math.hypot(netuno.x - rival.x, netuno.y - rival.y) < md * 1.3) melhor = netuno;
+    for (const o of [terra, marte, saturno, jupiter, netuno])
+      if (o && Math.hypot(o.x - rival.x, o.y - rival.y) < md * 1.3) melhor = o;
     rival.alvo = melhor;
   }
   if (rival.alvo) {
@@ -1379,8 +1419,8 @@ function passoRival(L) {
     // a trombada, e na trombada quem tem menos estrela é que paga
     if (caçando) {
       const d = Math.hypot(dx, dy);
-      const perto = (rm + raioMundo()) * CFG.RIVAL_DISTANCIA;
-      if (d < perto) rival.ang += Math.PI;      // recua sem parar de mirar
+      const outroR = rival.alvo === buraco ? raioMundo() : raioMundoNivel(rival.alvo.nivel);
+      if (d < (rm + outroR) * CFG.RIVAL_DISTANCIA) rival.ang += Math.PI;
     }
   }
 
@@ -1401,46 +1441,82 @@ function passoRival(L) {
   if (rival.y < L.y0 + m) { rival.y = L.y0 + m; rival.vy = Math.abs(rival.vy); }
   if (rival.x > L.x1 - m) { rival.x = L.x1 - m; rival.vx = -Math.abs(rival.vx); }
   if (rival.y > L.y1 - m) { rival.y = L.y1 - m; rival.vy = -Math.abs(rival.vy); }
+}
 
-  // trombada: os dois se arremessam, e o menor perde massa
-  const dx = rival.x - buraco.x, dy = rival.y - buraco.y;
-  const d = Math.hypot(dx, dy) || 0.001;
-  const minimo = rm + raioMundo();
-  if (d < minimo) {
-    const ux = dx / d, uy = dy / d;
-    const folga = (minimo - d) / 2 + 1;
-    rival.x += ux * folga;  rival.y += uy * folga;
-    buraco.x -= ux * folga; buraco.y -= uy * folga;
-    if (cena === "jogo" && esperaColisao <= 0) trombada(ux, uy);
+/* o adversário visível mais próximo — é em quem o jogador acerta sem escolher */
+function maisPerto(quem) {
+  let melhor = null, md = Infinity;
+  for (const p of todos()) {
+    if (p === quem) continue;
+    const d = Math.hypot(p.x - quem.x, p.y - quem.y);
+    if (d < md && naTela(p.x, p.y, 0)) { md = d; melhor = p; }
+  }
+  return melhor;
+}
+
+/* quem está na frente, tirando quem perguntou */
+function lider(quem) {
+  let melhor = null;
+  for (const p of todos()) {
+    if (p === quem) continue;
+    if (!melhor || p.comidas > melhor.comidas) melhor = p;
+  }
+  return melhor;
+}
+
+const raioDe = p => p === buraco ? raioMundo() : raioMundoNivel(p.nivel);
+
+/* Todo mundo trombando com todo mundo, inclusive rival com rival: a partida
+   com três vira uma disputa de verdade, não dois duelos separados. */
+function passoTrombadas() {
+  const lista = todos();
+  for (let i = 0; i < lista.length; i++) {
+    for (let j = i + 1; j < lista.length; j++) {
+      const a = lista[i], b = lista[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.hypot(dx, dy) || 0.001;
+      const minimo = raioDe(a) + raioDe(b);
+      if (d >= minimo) continue;
+      const ux = dx / d, uy = dy / d;
+      const folga = (minimo - d) / 2 + 1;
+      b.x += ux * folga;  b.y += uy * folga;
+      a.x -= ux * folga;  a.y -= uy * folga;
+      if (cena === "jogo" && esperaColisao <= 0) trombada(a, b, ux, uy);
+    }
   }
 }
 
 /* Encostou: os dois voam para lados opostos, a tela sacode forte, as cores
    se separam, e quem tem menos estrelas larga um punhado delas no campo. */
-function trombada(ux, uy) {
+function trombada(a, b, ux, uy) {
   esperaColisao = CFG.COLISAO_ESPERA;
   const emp = CFG.COLISAO_EMPURRAO / zoom;
-  buraco.vx = -ux * emp; buraco.vy = -uy * emp;
-  rival.vx  =  ux * emp; rival.vy  =  uy * emp;
-  // quem está com escudo é empurrado, mas não fica zonzo nem perde estrela:
-  // "invencível" tem que valer também para o avanço do outro
-  buraco.atordoado = buraco.imune > 0 ? 0 : CFG.COLISAO_ATORDOA;
-  rival.atordoado = rival.imune > 0 ? 0 : CFG.COLISAO_ATORDOA;
-  if (buraco.imune > 0) escudou(buraco, buraco.x, buraco.y);
-  if (rival.imune > 0) escudou(rival, rival.x, rival.y);
-  buraco.pulso = 1; rival.pulso = 1;
-  buraco.surpresa = rival.surpresa = CFG.COLISAO_SURPRESA;
-  rival.alvo = null;                     // ele reavalia depois de levar o tranco
+  a.vx = -ux * emp; a.vy = -uy * emp;
+  b.vx =  ux * emp; b.vy =  uy * emp;
+  for (const p of [a, b]) {
+    // quem está com escudo é empurrado, mas não fica zonzo nem perde estrela:
+    // "invencível" tem que valer também para o avanço do outro
+    p.atordoado = p.imune > 0 ? 0 : CFG.COLISAO_ATORDOA;
+    if (p.imune > 0) escudou(p, p.x, p.y);
+    p.pulso = 1;
+    p.surpresa = CFG.COLISAO_SURPRESA;
+    if (p !== buraco) p.alvo = null;      // ele reavalia depois do tranco
+  }
 
-  tremor = CFG.COLISAO_TREMOR;
-  aberr = CFG.COLISAO_ABERR;
-  flashLado = 30;
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+  const meu = a === buraco || b === buraco;
+  // só sacode a tela na trombada que envolve você; entre rivais, um estalo
+  if (meu) {
+    tremor = CFG.COLISAO_TREMOR;
+    aberr = CFG.COLISAO_ABERR;
+    flashLado = 30;
+  } else if (naTela(mx, my, 20)) {
+    tremor = Math.max(tremor, 10);
+  }
+  faiscar(mx, my, meu ? 34 : 18, 2, 8);
+  aneis.push({ x: mx, y: my, r: 4, vida: 22, total: 22, rival: !meu });
 
-  const mx = (buraco.x + rival.x) / 2, my = (buraco.y + rival.y) / 2;
-  faiscar(mx, my, 34, 2, 8);
-  aneis.push({ x: mx, y: my, r: 4, vida: 22, total: 22, rival: false });
-
-  const perdedor = buraco.comidas <= rival.comidas ? buraco : rival;
+  const perdedor = a.comidas <= b.comidas ? a : b;
   if (perdedor.imune > 0) return;               // escudo segura a conta também
   const quantas = Math.min(CFG.COLISAO_ESTRELAS, perdedor.comidas);
   if (quantas <= 0) return;
@@ -1497,8 +1573,8 @@ function passoCadente(L) {
   cadente.vida--;
 
   const rc = CFG.CADENTE_RAIO / zoom;
-  for (const p of [buraco, rival]) {
-    const rp = p === buraco ? raioMundo() : raioMundoNivel(p.nivel);
+  for (const p of todos()) {
+    const rp = raioDe(p);
     if (Math.hypot(cadente.x - p.x, cadente.y - p.y) < rp + rc) {
       faiscar(cadente.x, cadente.y, 30, 3, 8);
       for (let k = 0; k < 26; k++) {
@@ -1553,8 +1629,8 @@ function passoCometa(L) {
   if (quadro % 3 === 0) bafo(cometa.x, cometa.y, 1, 0.5);   // poeira caindo do rabo
 
   const rc = CFG.COMETA_RAIO / zoom;
-  for (const p of [buraco, rival]) {
-    const rp = p === buraco ? raioMundo() : raioMundoNivel(p.nivel);
+  for (const p of todos()) {
+    const rp = raioDe(p);
     if (Math.hypot(cometa.x - p.x, cometa.y - p.y) < rp + rc) {
       // com escudo, o cometa se despedaça sem deixar enjoo
       if (!escudou(p, cometa.x, cometa.y)) adoecer(p);
@@ -1578,7 +1654,7 @@ function escudou(p, x, y) {
     flashAzul = Math.max(flashAzul, 16);
     tremor = Math.max(tremor, 6);
   }
-  aneis.push({ x: x, y: y, r: 2, vida: 16, total: 16, rival: p === rival });
+  aneis.push({ x: x, y: y, r: 2, vida: 16, total: 16, rival: p !== buraco, pal: p !== buraco ? paletaDe(p).disco : null });
   for (let k = 0; k < 14; k++) {
     const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random() * 1.1) / zoom;
     faiscas.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
@@ -1592,7 +1668,8 @@ function adoecer(p) {
   p.enjoo = CFG.COMETA_ENJOO;
   p.pulso = 1; p.boca = 24;
   bafo(p.x, p.y, 30, 1.6);
-  aneis.push({ x: p.x, y: p.y, r: 3, vida: 20, total: 20, rival: p === rival });
+  aneis.push({ x: p.x, y: p.y, r: 3, vida: 20, total: 20, rival: p !== buraco,
+               pal: p !== buraco ? paletaDe(p).disco : null });
   // a pancada também freia na hora: senão o congelamento demora a ser sentido
   p.vx *= 0.4; p.vy *= 0.4;
   if (p !== buraco) return;
@@ -1675,7 +1752,8 @@ function passo() {
   if (buraco.x > L.x1 - m) { buraco.x = L.x1 - m; buraco.vx *= -0.35; }
   if (buraco.y > L.y1 - m) { buraco.y = L.y1 - m; buraco.vy *= -0.35; }
 
-  passoRival(L);
+  for (const r of rivais) passoRival(r, L);
+  passoTrombadas();
   passoCadente(L);
   passoCometa(L);
 
@@ -1691,17 +1769,15 @@ function passo() {
 
   /* — estrelas: os dois disputam; ganha quem estiver proporcionalmente
        mais perto, medindo pelo próprio alcance de cada um — */
-  const sugadores = [
-    { quem: buraco, x: buraco.x, y: buraco.y, rm: raioMundo() },
-    { quem: rival,  x: rival.x,  y: rival.y,  rm: raioMundoNivel(rival.nivel) }
-  ];
+  const sugadores = todos().map(p => ({ quem: p, x: p.x, y: p.y, rm: raioDe(p) }));
   // o ímã de Marte estica só o alcance do jogador, e por pouco tempo:
   // esticar demais faria as estrelas virem sozinhas e tirava a graça de mirar.
   // O gesto de espiral soma por cima, enquanto o dedo estiver rodando
   sugadores[0].alc = sugadores[0].rm * CFG.ALCANCE_SUCCAO *
                      (ima > 0 ? CFG.MARTE_ALCANCE : 1) *
                      (1 + espiral * CFG.ESPIRAL_ALCANCE);
-  sugadores[1].alc = sugadores[1].rm * CFG.ALCANCE_SUCCAO;
+  for (let k = 1; k < sugadores.length; k++)
+    sugadores[k].alc = sugadores[k].rm * CFG.ALCANCE_SUCCAO;
 
   for (let i = estrelas.length - 1; i >= 0; i--) {
     const e = estrelas[i];
@@ -1751,8 +1827,11 @@ function passo() {
     terra.y = limitar(terra.y, L.y0 + rt, L.y1 - rt);
     if (Math.hypot(terra.x - buraco.x, terra.y - buraco.y) < raioMundo() + rt * 0.4)
       engolirTerra(buraco);
-    else if (Math.hypot(terra.x - rival.x, terra.y - rival.y) < raioMundoNivel(rival.nivel) + rt * 0.4)
-      engolirTerra(rival);
+    else for (const r of rivais) {
+      if (Math.hypot(terra.x - r.x, terra.y - r.y) < raioMundoNivel(r.nivel) + rt * 0.4) {
+        engolirTerra(r); break;
+      }
+    }
   } else if (--esperaTerra <= 0) {
     terra = novaTerra();
   }
@@ -1768,8 +1847,11 @@ function passo() {
     marte.y = limitar(marte.y, L.y0 + rm2, L.y1 - rm2);
     if (Math.hypot(marte.x - buraco.x, marte.y - buraco.y) < raioMundo() + rm2 * 0.4)
       engolirMarte(buraco);
-    else if (Math.hypot(marte.x - rival.x, marte.y - rival.y) < raioMundoNivel(rival.nivel) + rm2 * 0.4)
-      engolirMarte(rival);
+    else for (const r of rivais) {
+      if (Math.hypot(marte.x - r.x, marte.y - r.y) < raioMundoNivel(r.nivel) + rm2 * 0.4) {
+        engolirMarte(r); break;
+      }
+    }
   } else if (--esperaMarte <= 0) {
     marte = novoMarte();
   }
@@ -1785,8 +1867,11 @@ function passo() {
     saturno.y = limitar(saturno.y, L.y0 + rs, L.y1 - rs);
     if (Math.hypot(saturno.x - buraco.x, saturno.y - buraco.y) < raioMundo() + rs * 0.4)
       engolirSaturno(buraco);
-    else if (Math.hypot(saturno.x - rival.x, saturno.y - rival.y) < raioMundoNivel(rival.nivel) + rs * 0.4)
-      engolirSaturno(rival);
+    else for (const r of rivais) {
+      if (Math.hypot(saturno.x - r.x, saturno.y - r.y) < raioMundoNivel(r.nivel) + rs * 0.4) {
+        engolirSaturno(r); break;
+      }
+    }
   } else if (--esperaSaturno <= 0) {
     saturno = novoSaturno();
   }
@@ -1802,8 +1887,11 @@ function passo() {
     jupiter.y = limitar(jupiter.y, L.y0 + rj, L.y1 - rj);
     if (Math.hypot(jupiter.x - buraco.x, jupiter.y - buraco.y) < raioMundo() + rj * 0.4)
       engolirJupiter(buraco);
-    else if (Math.hypot(jupiter.x - rival.x, jupiter.y - rival.y) < raioMundoNivel(rival.nivel) + rj * 0.4)
-      engolirJupiter(rival);
+    else for (const r of rivais) {
+      if (Math.hypot(jupiter.x - r.x, jupiter.y - r.y) < raioMundoNivel(r.nivel) + rj * 0.4) {
+        engolirJupiter(r); break;
+      }
+    }
   } else if (--esperaJupiter <= 0) {
     jupiter = novoJupiter();
   }
@@ -1819,18 +1907,22 @@ function passo() {
     netuno.y = limitar(netuno.y, L.y0 + rn, L.y1 - rn);
     if (Math.hypot(netuno.x - buraco.x, netuno.y - buraco.y) < raioMundo() + rn * 0.4)
       engolirNetuno(buraco);
-    else if (Math.hypot(netuno.x - rival.x, netuno.y - rival.y) < raioMundoNivel(rival.nivel) + rn * 0.4)
-      engolirNetuno(rival);
+    else for (const r of rivais) {
+      if (Math.hypot(netuno.x - r.x, netuno.y - r.y) < raioMundoNivel(r.nivel) + rn * 0.4) {
+        engolirNetuno(r); break;
+      }
+    }
   } else if (--esperaNetuno <= 0) {
     netuno = novoNetuno();
   }
 
   /* — o roubo de estrelas, enquanto o poder dura, dos dois lados — */
   drenando = false;
-  for (const p of [buraco, rival]) {
+  for (const p of todos()) {
     if (p.dreno <= 0) continue;
     p.dreno--;
-    const outro = p === buraco ? rival : buraco;
+    const outro = p === buraco ? maisPerto(p) : lider(p);
+    if (!outro) { p.ritmoDreno = Math.min(p.ritmoDreno, 20); continue; }
     // basta estar na mesma tela: com raio fixo, no zoom afastado o alvo
     // aparecia na tela e mesmo assim ficava fora do alcance, o que confunde
     if (naTela(p.x, p.y, -CFG.JUPITER_FOLGA) &&
@@ -1848,13 +1940,14 @@ function passo() {
   }
 
   /* — a torre de gelo atira enquanto o poder dura, dos dois lados — */
-  for (const p of [buraco, rival]) {
+  for (const p of todos()) {
     if (p.tiro <= 0) continue;
     p.tiro--;
     if (p.recargaTiro > 0) p.recargaTiro--;
     // Só atira quem está visível, e só em quem está visível: a câmera segue o
-    // jogador, então isso vale para os dois — ninguém leva tiro de fora da tela
-    const outro = p === buraco ? rival : buraco;
+    // jogador, então isso vale para todos — ninguém leva tiro de fora da tela
+    const outro = p === buraco ? maisPerto(p) : lider(p);
+    if (!outro) continue;
     if (p.recargaTiro <= 0 &&
         naTela(p.x, p.y, -CFG.SATURNO_FOLGA) &&
         naTela(outro.x, outro.y, -CFG.SATURNO_FOLGA)) atirarBloco(p, outro);
@@ -1896,29 +1989,29 @@ function passoParticulas() {
     a.r += 1.1 / zoom;
     if (--a.vida <= 0) aneis.splice(i, 1);
   }
-  buraco.pulso *= 0.85; rival.pulso *= 0.85;
+  for (const p of todos()) p.pulso *= 0.85;
   if (buraco.boca > 0) buraco.boca--;
-  if (rival.boca > 0) rival.boca--;
+  for (const r of rivais) if (r.boca > 0) r.boca--;
   if (flashTerra > 0) flashTerra--;
   if (flashIma > 0) flashIma--;
   if (flashTiro > 0) flashTiro--;
   if (flashRoxo > 0) flashRoxo--;
   if (flashAzul > 0) flashAzul--;
   if (buraco.imune > 0) buraco.imune--;
-  if (rival.imune > 0) rival.imune--;
+  for (const r of rivais) if (r.imune > 0) r.imune--;
   // a tela nunca fica parada durante o efeito: um tremor de fundo baixinho
-  if (buraco.dreno > 0 || rival.dreno > 0) tremor = Math.max(tremor, drenando ? 3.5 : 2);
+  if (todos().some(p => p.dreno > 0)) tremor = Math.max(tremor, drenando ? 3.5 : 2);
   if (ima > 0) { ima--; faiscarIma(); if (quadro % 2 === 0) faiscarIma(); }
   if (flashEnjoo > 0) flashEnjoo--;
   if (buraco.surpresa > 0) buraco.surpresa--;
-  if (rival.surpresa > 0) rival.surpresa--;
+  for (const r of rivais) if (r.surpresa > 0) r.surpresa--;
   if (buraco.enjoo > 0) {
     buraco.enjoo--;
     if (quadro % 4 === 0) bafo(buraco.x, buraco.y, 1, 0.5);   // lascas caindo
   }
-  if (rival.enjoo > 0) {
-    rival.enjoo--;
-    if (quadro % 6 === 0) bafo(rival.x, rival.y, 1, 0.5);
+  for (const r of rivais) if (r.enjoo > 0) {
+    r.enjoo--;
+    if (quadro % 6 === 0) bafo(r.x, r.y, 1, 0.5);
   }
   if (turbo > 0) { raiarTurbo(); if (quadro % 2 === 0) raiarTurbo(); }
 
@@ -1987,7 +2080,7 @@ function subiuDeNivel(dono) {
     aberr = CFG.ABERRACAO; arco = CFG.ARCO;
     soltarCoracoes(buraco.x, buraco.y, 34, 2.1, 1);   // chuva de corações
   } else {
-    soltarCoracoes(rival.x, rival.y, 8, 1.2, 0);
+    soltarCoracoes(dono.x, dono.y, 8, 1.2, 0);
   }
 }
 
@@ -2021,7 +2114,8 @@ function engolirEstrela(indice, dono) {
   estrelas.splice(indice, 1);
   if (cena !== "jogo") return;          // no menu ele come só de enfeite
   dono.pulso = 1; dono.boca = 18;
-  aneis.push({ x: e.x, y: e.y, r: 2, vida: 15, total: 15, rival: dono === rival });
+  aneis.push({ x: e.x, y: e.y, r: 2, vida: 15, total: 15, rival: dono !== buraco,
+               pal: dono !== buraco ? paletaDe(dono).disco : null });
   if (dono === buraco && Math.random() < 0.28) soltarCoracoes(e.x, e.y, 1, 0.7, 0);
   ganharEstrelas(dono, 1);
 }
@@ -2130,7 +2224,7 @@ function passoBlocos(L) {
                        vida: 12 + Math.floor(Math.random() * 10), arrasto: 0.94,
                        tipo: "enjoo", cor: COR.bloco[Math.floor(Math.random() * 3)] });
       }
-      aneis.push({ x: g.x, y: g.y, r: 2, vida: 14, total: 14, rival: vitima === rival });
+      aneis.push({ x: g.x, y: g.y, r: 2, vida: 14, total: 14, rival: vitima !== buraco, pal: vitima !== buraco ? paletaDe(vitima).disco : null });
       blocos.splice(i, 1);
       continue;
     }
@@ -2165,7 +2259,7 @@ function arrancarEstrela(de, vitima) {
   vitima.surpresa = Math.max(vitima.surpresa, 20);
   tremor = Math.max(tremor, vitima === buraco ? 8 : 5);
   flashRoxo = Math.max(flashRoxo, 14);
-  aneis.push({ x: vitima.x, y: vitima.y, r: 2, vida: 14, total: 14, rival: vitima === rival });
+  aneis.push({ x: vitima.x, y: vitima.y, r: 2, vida: 14, total: 14, rival: vitima !== buraco, pal: vitima !== buraco ? paletaDe(vitima).disco : null });
   const rr = vitima === buraco ? raioMundo() : raioMundoNivel(vitima.nivel);
   const a = Math.random() * Math.PI * 2;
   roubadas.push({
@@ -2194,7 +2288,7 @@ function passoRoubadas() {
       // chegou: agora sim o ponto entra, com o mesmo estalo de engolir estrela
       ganharEstrelas(p, 1);
       p.pulso = 1; p.boca = 16;
-      aneis.push({ x: p.x, y: p.y, r: 2, vida: 14, total: 14, rival: p === rival });
+      aneis.push({ x: p.x, y: p.y, r: 2, vida: 14, total: 14, rival: p !== buraco, pal: p !== buraco ? paletaDe(p).disco : null });
       faiscar(p.x, p.y, 8, 3, 8);
       roubadas.splice(i, 1);
       continue;
@@ -2562,7 +2656,7 @@ function desenharMundo() {
   for (const a of aneis) {
     const rr = a.r * zoom;
     const p = a.vida / a.total;
-    const paleta = a.rival ? COR.discoR : COR.disco;
+    const paleta = a.rival ? (a.pal || COR.discoR) : COR.disco;
     const cor = paleta[p > 0.55 ? 5 : 3];
     const passos = Math.max(10, Math.ceil(rr * 6));
     for (let i = 0; i < passos; i++) {
@@ -2771,8 +2865,12 @@ function desenharCometa() {
 }
 
 function desenharBuraco() {
-  desenharPersonagem(rival, raioMundoNivel(rival.nivel) * zoom,
-                     COR.discoR, COR.rivalHalo, COR.rivalContorno, COR.rivalBlush, false);
+  // os que estão atrás primeiro, para o mais próximo do jogador ficar por cima
+  for (const r of rivais) {
+    const pal = paletaDe(r);
+    desenharPersonagem(r, raioMundoNivel(r.nivel) * zoom,
+                       pal.disco, pal.halo, pal.contorno, pal.blush, false);
+  }
   desenharPersonagem(buraco, raioTela,
                      COR.disco, COR.halo, COR.contorno, COR.blush, true);
 }
@@ -2865,7 +2963,7 @@ function desenharClaraoIma() {
 function desenharBrilhoRoxo() {
   // o campo aparece com o poder de qualquer um dos dois: quem está apanhando
   // também precisa ver que tem um dreno rolando
-  const ativo = buraco.dreno > 0 || rival.dreno > 0;
+  const ativo = todos().some(p => p.dreno > 0);
   if (!ativo && flashRoxo <= 0) return;
   const base = ativo ? 0.26 + 0.1 * Math.sin(quadro * 0.12) : 0;
   const p = Math.max(base, flashRoxo > 0 ? flashRoxo / CFG.JUPITER_CLARAO : 0);
@@ -3022,12 +3120,15 @@ function marcaNaBorda(mx0, my0, cores, estilo) {
   if (estilo === 1) disco(rx + ca * tam * 0.32, ry + sa * tam * 0.32, 1.6, cores[2]);
 }
 
-/* quando o rival sai de vista, uma marca azul na borda mostra onde ele está */
+/* cada rival fora de vista ganha sua marca na borda, na cor dele */
 function desenharMarcaRival() {
-  const rx = paraTelaX(rival.x), ry = paraTelaY(rival.y);
-  const rr = raioMundoNivel(rival.nivel) * zoom;
-  if (rx > -rr && rx < VL + rr && ry > -rr && ry < VA + rr) return;
-  marcaNaBorda(rx, ry, [COR.discoR[4], COR.discoR[6], COR.discoR[2]], 0);
+  for (const r of rivais) {
+    const rx = paraTelaX(r.x), ry = paraTelaY(r.y);
+    const rr = raioMundoNivel(r.nivel) * zoom;
+    if (rx > -rr && rx < VL + rr && ry > -rr && ry < VA + rr) continue;
+    const p = paletaDe(r);
+    marcaNaBorda(rx, ry, [p.disco[4], p.disco[6], p.disco[2]], 0);
+  }
 }
 
 function desenharMarcaCadente() {
@@ -3088,7 +3189,6 @@ function desenharHUD() {
   const b0 = botaoSair();
   const LARG = Math.max(28, Math.min(52, b0.x - 5 - 6));
   const meu = "" + buraco.comidas;
-  const tr = "" + rival.comidas;
   const alvo = "/" + CFG.META;
 
   texto(meu, 5, 4, COR.hud, 1);
@@ -3096,11 +3196,18 @@ function desenharHUD() {
   barra(5, 13, LARG, buraco.nivel < CFG.NIVEL_MAX
         ? buraco.progresso / custoDoNivel(buraco.nivel) : 1, COR.disco[4]);
 
-  const dirTot = larguraTexto(tr, 1) + 1 + larguraTexto(alvo, 1);
-  texto(tr, VL - 5 - dirTot, 4, COR.discoR[6], 1);
-  texto(alvo, VL - 5 - larguraTexto(alvo, 1), 4, COR.hudFraco, 1);
-  barra(VL - 5 - LARG, 13, LARG, rival.nivel < CFG.NIVEL_MAX
-        ? rival.progresso / custoDoNivel(rival.nivel) : 1, COR.discoR[5]);
+  // os rivais empilham à direita, um por linha, na cor de cada um
+  let yr = 4;
+  for (const r of rivais) {
+    const p = paletaDe(r);
+    const n = "" + r.comidas;
+    const tot = larguraTexto(n, 1) + 1 + larguraTexto(alvo, 1);
+    texto(n, VL - 5 - tot, yr, p.disco[6], 1);
+    texto(alvo, VL - 5 - larguraTexto(alvo, 1), yr, COR.hudFraco, 1);
+    barra(VL - 5 - LARG, yr + 9, LARG, r.nivel < CFG.NIVEL_MAX
+          ? r.progresso / custoDoNivel(r.nivel) : 1, p.disco[5]);
+    yr += 16;
+  }
 
   if (flash > 0) textoCentro("CRESCEU!", Math.round(VA * 0.3), COR.coracao[1], 2);
   desenharAnuncio();
@@ -3118,17 +3225,22 @@ function desenharFim() {
 
   const ganhou = vencedor === buraco;
   const topo = Math.round(VA * 0.24);
+  const palV = ganhou ? null : paletaDe(vencedor);
   textoCentro(ganhou ? "voce venceu!" : "o rival venceu!", topo,
-              ganhou ? COR.hud : COR.discoR[6], 2);
+              ganhou ? COR.hud : palV.disco[6], 2);
   textoCentro("chegou a " + CFG.META + " estrelas", topo + 22, COR.hudFraco, 1);
 
-  const y0 = topo + 46;
-  texto("voce", 24, y0, COR.hud, 1);
-  const e1 = buraco.comidas + " estrelas";
-  texto(e1, VL - 24 - larguraTexto(e1, 1), y0, COR.hud, 1);
-  texto("rival", 24, y0 + 14, COR.discoR[6], 1);
-  const e2 = rival.comidas + " estrelas";
-  texto(e2, VL - 24 - larguraTexto(e2, 1), y0 + 14, COR.discoR[6], 1);
+  // placar de todo mundo, do maior para o menor
+  const ordem = todos().slice().sort((a, b) => b.comidas - a.comidas);
+  let y0 = topo + 46;
+  for (const p of ordem) {
+    const eu = p === buraco;
+    const cor = eu ? COR.hud : paletaDe(p).disco[6];
+    texto(eu ? "voce" : "rival " + (p.indice + 1), 24, y0, cor, 1);
+    const e1 = p.comidas + " estrelas";
+    texto(e1, VL - 24 - larguraTexto(e1, 1), y0, cor, 1);
+    y0 += 14;
+  }
 
   const b = botaoJogar();
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
@@ -3139,6 +3251,17 @@ function desenharFim() {
   const bs = botaoSair();
   caixa(bs, COR.painel, COR.hudFraco);
   texto("X", bs.x + Math.round((bs.l - larguraTexto("X", 1)) / 2), bs.y + 3, COR.hud, 1);
+}
+
+/* Um quadradinho por opção de número de oponentes, logo acima do JOGAR. */
+function botaoOponente(i) {
+  const l = 20, esp = 6;
+  const total = CFG.RIVAIS_MAX * l + (CFG.RIVAIS_MAX - 1) * esp;
+  const x0 = Math.round((VL - total) / 2);
+  const b = botaoJogar();
+  // abaixo do JOGAR: acima, a linha batia bem em cima do personagem que
+  // fica esperando no meio da tela
+  return { x: x0 + i * (l + esp), y: b.y + b.a + 16, l: l, a: 18 };
 }
 
 function desenharMenu() {
@@ -3153,12 +3276,27 @@ function desenharMenu() {
   textoCentro("devoradores de estrelas",
               topo + FONTE_H * tamNome + 6, COR.disco[4], 1);
 
+  /* quantos oponentes */
+  const rot = "oponentes";
+  texto(rot, Math.round((VL - larguraTexto(rot, 1)) / 2),
+        botaoOponente(0).y - 9, COR.hudFraco, 1);
+  for (let i = 0; i < CFG.RIVAIS_MAX; i++) {
+    const bo = botaoOponente(i);
+    const escolhido = CFG.RIVAIS === i + 1;
+    // cada opção pinta na cor do rival que ela acrescenta
+    const cor = COR.rivais[i].disco[6];
+    caixa(bo, escolhido ? COR.painel : COR.vazio, escolhido ? cor : COR.hudFraco);
+    const n = "" + (i + 1);
+    texto(n, bo.x + Math.round((bo.l - larguraTexto(n, 1)) / 2),
+          bo.y + Math.round((bo.a - FONTE_H) / 2) + 1,
+          escolhido ? cor : COR.hudFraco, 1);
+  }
+
   const b = botaoJogar();
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
   caixa(b, COR.painel, pulso > 0.5 ? COR.disco[5] : COR.disco[4]);
   texto("JOGAR", b.x + Math.round((b.l - larguraTexto("JOGAR", 2)) / 2),
         b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
-
 }
 
 function desenharAnalogico() {
@@ -3268,7 +3406,7 @@ function vinheta() {
    mistura "saturation" do canvas, que é barato porque não sai do compositor.
    Roda antes do HUD de propósito. */
 function campoRoxo() {
-  const d = Math.max(buraco.dreno, rival.dreno);
+  const d = Math.max.apply(null, todos().map(p => p.dreno));
   if (d <= 0) return;
   // sobe rápido e desce no fim, para não cortar seco quando o poder acaba
   const f = Math.min(1, (CFG.JUPITER_DRENO - d) / 12) * Math.min(1, d / 40);
