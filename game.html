@@ -51,9 +51,11 @@ const CFG = {
      cresce como (1 + n*PASSO + n²*CURVA) — o termo quadrático é o que faz
      cada nível render mais que o de antes. Com a fórmula linear antiga, a
      abertura ia diminuindo em campo visto conforme o zoom caía. */
-  ZOOM_PASSO: 0.022,     // abertura por nível
-  ZOOM_CURVA: 0.0016,    // e o quanto essa abertura acelera
-  ZOOM_MIN: 0.55,        // afastamento máximo
+  ZOOM_PASSO: 0.026,     // abertura por nível
+  ZOOM_CURVA: 0.0027,    // e o quanto essa abertura acelera
+  ZOOM_MIN: 0.5,         // afastamento máximo
+  ZOOM_ESTOURO: 0.075,   // o quanto a câmera passa do ponto ao subir de nível
+  ZOOM_FREIO: 0.9,       // com que rapidez esse estouro assenta
   MUNDO_MULT: 2.4,       // o mundo tem esta vez o tamanho do que a câmera vê
 
   /* movimento (em pixels de TELA por quadro: o mundo já compensa o zoom) */
@@ -1154,6 +1156,7 @@ let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, arco = 0, q
 let esperaColisao = 0, cadente = null, esperaCadente = 0;
 let cometa = null, esperaCometa = 0, flashEnjoo = 0;
 let zoom = 1, zoomAlvo = 1, raioTela = CFG.RAIO_BASE;
+let expansao = 0;       // 1 no instante do nível novo, decai até 0
 const cam = { x: 0, y: 0 };
 
 /* quanto custa sair do nível n: cada nível pede mais que o anterior */
@@ -1283,7 +1286,7 @@ function reiniciar() {
   buraco.vx = buraco.vy = 0; buraco.ang = -Math.PI / 2;
   buraco.pulso = 0; buraco.boca = 0; buraco.atordoado = 0; aneis = [];
   faiscas = []; coracoes = []; tremor = 0; flash = 0; flashLado = 0; aberr = 0;
-  arco = 0; turbo = 0; esperaColisao = 0;
+  arco = 0; turbo = 0; esperaColisao = 0; expansao = 0;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
   buraco.enjoo = 0; buraco.surpresa = 0;
@@ -1832,7 +1835,19 @@ function passo() {
   const raioAlvo = CFG.RAIO_BASE + buraco.nivel * CFG.RAIO_TELA_PASSO;
   zoomAlvo = zoomDoNivel(buraco.nivel);
   raioTela += (raioAlvo - raioTela) * 0.08;
-  zoom += (zoomAlvo - zoom) * 0.05;
+  /* Ao subir de nível a câmera não vai direto ao novo zoom: ela passa do
+     ponto e volta. É o mesmo truque de uma câmera de cinema puxando para
+     trás — o exagero de meio segundo é o que faz o ganho de campo ser
+     SENTIDO, em vez de escorregar despercebido em algumas dezenas de
+     quadros. Fora da animação, a aproximação lenta de sempre. */
+  if (expansao > 0.004) {
+    expansao *= CFG.ZOOM_FREIO;
+    const alvo = zoomAlvo * (1 - expansao * CFG.ZOOM_ESTOURO);
+    zoom += (alvo - zoom) * 0.16;
+  } else {
+    expansao = 0;
+    zoom += (zoomAlvo - zoom) * 0.05;
+  }
 
   /* — o campo repõe estrelas conforme o universo abre — */
   const alvo = alvoEstrelas();
@@ -2071,7 +2086,9 @@ function passoParticulas() {
   if (buraco.imune > 0) buraco.imune--;
   for (const r of rivais) if (r.imune > 0) r.imune--;
   // a tela nunca fica parada durante o efeito: um tremor de fundo baixinho
-  if (todos().some(p => p.dreno > 0)) tremor = Math.max(tremor, drenando ? 3.5 : 2);
+  // tremor de fundo do dreno: baixo o bastante para dar inquietação sem
+  // atrapalhar a mira. Antes era 3,5 e a tela não parava quieta
+  if (todos().some(p => p.dreno > 0)) tremor = Math.max(tremor, drenando ? 1.2 : 0.7);
   if (ima > 0) { ima--; faiscarIma(); if (quadro % 2 === 0) faiscarIma(); }
   if (flashEnjoo > 0) flashEnjoo--;
   if (buraco.surpresa > 0) buraco.surpresa--;
@@ -2149,6 +2166,7 @@ function subiuDeNivel(dono) {
   if (dono === buraco) {
     tremor = 22; flash = CFG.ARCO; flashLado = 36;
     aberr = CFG.ABERRACAO; arco = CFG.ARCO;
+    expansao = 1;                                     // a câmera abre e assenta
     soltarCoracoes(buraco.x, buraco.y, 34, 2.1, 1);   // chuva de corações
   } else {
     soltarCoracoes(dono.x, dono.y, 8, 1.2, 0);
@@ -2328,7 +2346,8 @@ function arrancarEstrela(de, vitima) {
   vitima.pulso = 1;
   vitima.boca = 14;
   vitima.surpresa = Math.max(vitima.surpresa, 20);
-  tremor = Math.max(tremor, vitima === buraco ? 8 : 5);
+  // 3 estrelas por segundo: um safanão a cada uma viraria trepidação contínua
+  tremor = Math.max(tremor, vitima === buraco ? 3 : 1.5);
   flashRoxo = Math.max(flashRoxo, 14);
   aneis.push({ x: vitima.x, y: vitima.y, r: 2, vida: 14, total: 14, rival: vitima !== buraco, pal: vitima !== buraco ? paletaDe(vitima).disco : null });
   const rr = vitima === buraco ? raioMundo() : raioMundoNivel(vitima.nivel);
