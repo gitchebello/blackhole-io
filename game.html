@@ -1039,9 +1039,9 @@ function botaoJogar() {
   const l = 90, a = 22;
   return { x: Math.round((VL - l) / 2), y: Math.round(VA * 0.60), l: l, a: a };
 }
-// canto superior direito, FORA do painel do placar: no meio ele caía em
-// cima das barras, que agora atravessam a tela inteira
-function botaoSair() { return { x: VL - 15, y: 3, l: 12, a: 12 }; }
+// meio do topo: os contadores ficam nos dois cantos e o X não briga com
+// nenhum deles
+function botaoSair() { return { x: Math.round(VL / 2) - 6, y: 3, l: 12, a: 12 }; }
 function dentro(gx, gy, r, folga) {
   folga = folga || 0;
   return gx >= r.x - folga && gx <= r.x + r.l + folga &&
@@ -3355,71 +3355,32 @@ function desenharHUD() {
   // Seta é só para jogador. Com quatro em campo, mais cometa e cadente, a
   // borda virava um festival de setas e ninguém achava o que importava.
   desenharMarcaRival();
-  /* PLACAR EM RANKING.
-     O layout anterior era simétrico — você à esquerda, os rivais à direita —
-     e isso escondia justamente a informação que decide a partida: quem está
-     na frente e por quanto. Com quatro em campo o jogador tinha que comparar
-     quatro números espalhados.
+  /* Placar enxuto: só o número de estrelas de cada um e, embaixo, um fio
+     fino com o que falta para o próximo nível. O painel em faixa larga que
+     havia aqui roubava o topo da tela inteiro e atrapalhava justamente na
+     hora de manobrar. A coroa fica ao lado de quem lidera.
+     Você à esquerda, os rivais empilhados à direita, o X no meio. */
+  const LARG = 26;
+  // 13, não 11: com 11 a barra de um rival encostava no número do de baixo
+  const ALT = 13;
 
-     Agora é uma coluna só, ordenada, com a barra medida rumo à META (300) e
-     não ao próximo nível: é a corrida que importa, e a barra vira a leitura
-     imediata da distância entre os concorrentes. A coroa aparece na linha do
-     primeiro, do mesmo jeito que aparece na cabeça dele.
-     A sua linha ganha um fundo e uma seta, porque com quatro cores parecidas
-     achar a sua no meio custava um segundo que ninguém tem. */
-  const ordem = todos().slice().sort((a, b) => b.comidas - a.comidas);
-  const ALT = 9;
-  // o painel para antes do X: barra passando por baixo de botão não se lê
-  const painel = { x: 4, y: 3, l: VL - 8 - 15, a: ordem.length * ALT + 4 };
-  ctx.globalAlpha = 0.55;
-  ctx.fillStyle = COR.painel;
-  ctx.fillRect(painel.x, painel.y, painel.l, painel.a);
-  ctx.globalAlpha = 1;
+  const meu = "" + buraco.comidas;
+  texto(meu, 5, 4, COR.hud, 1);
+  if (primeiro === buraco)
+    desenharCoroaHUD(5 + larguraTexto(meu, 1) + 2, 6, COR.hud);
+  barra(5, 13, LARG, buraco.nivel < CFG.NIVEL_MAX
+        ? buraco.progresso / custoDoNivel(buraco.nivel) : 1, COR.disco[4]);
 
-  const bSair = botaoSair();
-  const xNum = painel.x + 4;
-  const larguraNum = larguraTexto("000", 1);
-  const xBarra = xNum + larguraNum + 4;
-  const larBarra = painel.x + painel.l - 4 - xBarra - 9;    // deixa espaço p/ a coroa
-
-  for (let i = 0; i < ordem.length; i++) {
-    const p = ordem[i];
-    const eu = p === buraco;
-    const cor = eu ? COR.hud : paletaDe(p).disco[6];
-    const y = painel.y + 2 + i * ALT;
-
-    if (eu) {                                    // a sua linha em destaque
-      ctx.globalAlpha = 0.5;
-      ctx.fillStyle = COR.borda;
-      ctx.fillRect(painel.x + 1, y - 1, painel.l - 2, ALT - 1);
-      ctx.globalAlpha = 1;
-    }
-    // pastilha da cor de cada um, para casar com o boneco em campo
-    ctx.fillStyle = cor;
-    ctx.fillRect(painel.x + 1, y, 2, ALT - 2);
-
-    const n = "" + p.comidas;
-    texto(n, xNum + larguraNum - larguraTexto(n, 1), y - 1, cor, 1);
-
-    // barra rumo à meta
-    ctx.fillStyle = COR.borda;
-    ctx.fillRect(xBarra, y + 1, larBarra, 4);
-    ctx.fillStyle = COR.vazio;
-    ctx.fillRect(xBarra + 1, y + 2, larBarra - 2, 2);
-    const cheio = Math.round((larBarra - 2) * Math.min(1, p.comidas / CFG.META));
-    ctx.fillStyle = cor;
-    ctx.fillRect(xBarra + 1, y + 2, cheio, 2);
-
-    if (p === primeiro) desenharCoroaHUD(xBarra + larBarra + 4, y + 2, cor);
-  }
-
-  /* seu progresso para o próximo nível, um fio fino embaixo do painel */
-  if (buraco.nivel < CFG.NIVEL_MAX) {
-    const prog = buraco.progresso / custoDoNivel(buraco.nivel);
-    ctx.fillStyle = COR.borda;
-    ctx.fillRect(painel.x, painel.y + painel.a, painel.l, 2);
-    ctx.fillStyle = COR.disco[5];
-    ctx.fillRect(painel.x, painel.y + painel.a, Math.round(painel.l * prog), 2);
+  for (let i = 0; i < rivais.length; i++) {
+    const r = rivais[i];
+    const pal = paletaDe(r);
+    const n = "" + r.comidas;
+    const y = 4 + i * ALT;
+    texto(n, VL - 5 - larguraTexto(n, 1), y, pal.disco[6], 1);
+    if (primeiro === r)
+      desenharCoroaHUD(VL - 5 - larguraTexto(n, 1) - 9, y + 2, pal.disco[6]);
+    barra(VL - 5 - LARG, y + 9, LARG, r.nivel < CFG.NIVEL_MAX
+          ? r.progresso / custoDoNivel(r.nivel) : 1, pal.disco[5]);
   }
 
   // sobe um pouco: pegar a cadente dá 10 estrelas e quase sempre sobe de
