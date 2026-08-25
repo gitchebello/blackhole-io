@@ -185,8 +185,13 @@ const PALETAS = {
     vazio:  "#fdf7fa",                                  // o céu agora é branco
     // seis degraus: a franja continua clarinha e o miolo agora fecha em um tom
     // bem mais forte. É o contraste dentro da própria nuvem que dá o volume
+    /* Uma cor de nebulosa por jogador em campo, na tonalidade dele: rosa é
+       você, azul o rival 1, verde o rival 2 e amarelo o rival 3. As duas
+       últimas só entram quando esses rivais existem. */
     nebs: [["#fff2f8","#ffdfec","#ffc4dc","#ffa3c8","#f97fae","#ec5b93"],   // rosa
-           ["#f1f8fe","#dcecfa","#c0e0f7","#9dcdf3","#74b3e8","#4d96d8"]],  // azul
+           ["#f1f8fe","#dcecfa","#c0e0f7","#9dcdf3","#74b3e8","#4d96d8"],   // azul
+           ["#f0fdf9","#d5f5ec","#b0ebdb","#84dcc6","#57c5aa","#37a68b"],   // verde
+           ["#fffaef","#fff0d2","#ffe1ab","#ffcd7e","#f5b153","#dd9235"]],  // amarelo
     poeira:["#f2e8ee","#ecdfe8","#e4d5e0"],
     estrela:"#241c33",                                  // estrelas pretas
     estrelaSuave:"#6a5f80",
@@ -253,7 +258,9 @@ const PALETAS = {
   escuro: {
     vazio:  "#07050e",
     nebs: [["#1a0c18","#331330","#5c1e4d","#932c74","#cf4499","#ff6fc0"],   // rosa
-           ["#0a1020","#12233f","#1c3f6e","#2a66a6","#3f97d6","#6ec6f5"]],  // azul
+           ["#0a1020","#12233f","#1c3f6e","#2a66a6","#3f97d6","#6ec6f5"],   // azul
+           ["#08201b","#0d3830","#125349","#1a7a68","#26a88d","#43d6b4"],   // verde
+           ["#221708","#3d2a0f","#5e4318","#8a6524","#bb8d33","#f0bb52"]],  // amarelo
     poeira:["#171225","#1f1830","#28203c"],
     estrela:"#ffffff",
     estrelaSuave:"#9c90b4",
@@ -467,6 +474,12 @@ const MUNDO = {
 // que é como a pixel art faz degradê sem inventar cor nova
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
+/* Quantas cores de nebulosa entram: uma por jogador em campo. Com você e um
+   rival são duas; o terceiro jogador traz o verde e o quarto traz o amarelo. */
+function coresNebulosa() {
+  return Math.min(COR.nebs.length, 1 + limitar(CFG.RIVAIS, 1, CFG.RIVAIS_MAX));
+}
+
 /* Sorteia algumas nuvens espalhadas, de cores alternadas. Cada nuvem é
    um punhado de bolhas redondas que se fundem — fica fofa e simples de ler,
    em vez de fibrosa. Fora delas o espaço é preto de verdade. */
@@ -499,6 +512,14 @@ function sortearNebulosas() {
     if (cabe) lista.push(n);
   }
   // cores: uma parte para cada, embaralhadas, e sem duas vizinhas iguais
+  distribuirCores(lista, r);
+  return lista;
+}
+/* Reparte as cores entre as nuvens sem deixar duas vizinhas iguais. Ficou
+   separada de sortearNebulosas porque precisa rodar de novo quando o número
+   de jogadores muda, sem re-sortear posição e formato das nuvens. */
+function distribuirCores(lista, r) {
+  const cores = coresNebulosa();
   const vizinho = i => {
     let melhor = -1, dm = Infinity;
     for (let j = 0; j < lista.length; j++) {
@@ -508,7 +529,7 @@ function sortearNebulosas() {
     }
     return melhor;
   };
-  for (let i = 0; i < lista.length; i++) lista[i].pal = i % COR.nebs.length;
+  for (let i = 0; i < lista.length; i++) lista[i].pal = i % cores;
   for (let i = lista.length - 1; i > 0; i--) {          // embaralha as cores
     const j = Math.floor(r() * (i + 1));
     const t = lista[i].pal; lista[i].pal = lista[j].pal; lista[j].pal = t;
@@ -527,8 +548,8 @@ function sortearNebulosas() {
     }
     if (tudoCerto) break;
   }
-  return lista;
 }
+
 const NEBULOSAS = sortearNebulosas();
 
 /* A nebulosa é pintada uma vez POR CAMADA DE ZOOM. Antes existia um único
@@ -625,8 +646,20 @@ function pintarNebulosa(escala) {
 /* uma camada por degrau de zoom, da mais próxima à mais afastada */
 const CAMADAS = [];
 const N_CAMADAS = 4;
-for (let i = 0; i < N_CAMADAS; i++)
-  CAMADAS.push(pintarNebulosa(1 - (1 - CFG.ZOOM_MIN) * i / (N_CAMADAS - 1)));
+let coresPintadas = -1;      // com quantas cores as camadas atuais foram feitas
+
+/* As camadas são caras de gerar, então só voltam ao forno quando o número de
+   cores muda de verdade — e não a cada clique no seletor de oponentes. */
+function gerarCamadas() {
+  const cores = coresNebulosa();
+  if (cores === coresPintadas) return;
+  coresPintadas = cores;
+  distribuirCores(NEBULOSAS, semente(CFG.SEMENTE + 17));
+  CAMADAS.length = 0;
+  for (let i = 0; i < N_CAMADAS; i++)
+    CAMADAS.push(pintarNebulosa(1 - (1 - CFG.ZOOM_MIN) * i / (N_CAMADAS - 1)));
+}
+gerarCamadas();
 
 /* a menor camada que ainda não precisa ser ampliada */
 function camadaAtual() {
@@ -1275,7 +1308,8 @@ tela.addEventListener("pointerdown", e => {
     for (let i = 0; i < CFG.RIVAIS_MAX; i++)
       if (dentro(gx, gy, botaoOponente(i), 5)) {
         CFG.RIVAIS = i + 1;
-        reiniciar();                   // recoloca os bonecos já no menu
+        gerarCamadas();                // entra a cor de nebulosa do novo jogador
+        reiniciar();                   // e recoloca os bonecos já no menu
         return;
       }
     if (dentro(gx, gy, botaoJogar(), 6)) jogar();
@@ -3092,7 +3126,8 @@ function marcaNaBorda(mx0, my0, cores, estilo) {
 
   // a margem encolhe com o pulso: é isso que faz a seta cutucar para fora
   const marg = 15 - pulso * 4;
-  const tetoHUD = 22;                            // não encosta no placar
+  // o placar da direita cresce com o número de rivais; a seta desvia dele
+  const tetoHUD = dx > 0 ? 14 + 16 * rivais.length : 22;
   const m = Math.max(Math.abs(dx) / (VL / 2 - marg),
                      Math.abs(dy) / (VA / 2 - marg), 0.001);
   const bx = cx + dx / m, by = Math.max(cy + dy / m, dy < 0 ? tetoHUD : -1e9);
