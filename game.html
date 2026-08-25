@@ -55,14 +55,14 @@ const CFG = {
      cada nível render mais que o de antes. Com a fórmula linear antiga, a
      abertura ia diminuindo em campo visto conforme o zoom caía. */
   ZOOM_PASSO: 0.032,     // abertura por nível
-  ZOOM_CURVA: 0.004,     // e o quanto essa abertura acelera
-  ZOOM_MIN: 0.4,         // afastamento máximo
+  ZOOM_CURVA: 0.006,     // e o quanto essa abertura acelera
+  ZOOM_MIN: 0.33,        // afastamento máximo
   ZOOM_ESTOURO: 0.075,   // o quanto a câmera passa do ponto ao subir de nível
   ZOOM_FREIO: 0.9,       // com que rapidez esse estouro assenta
-  MUNDO_MULT: 2.2,       // o mundo tem esta vez o tamanho do que a câmera vê.
-                         // Caiu de 2,4 para compensar o zoom mais aberto: o
-                         // mundo é gerado no tamanho TOTALMENTE expandido, e
-                         // ele multiplica a memória das nebulosas
+  MUNDO_MULT: 2,         // o mundo tem esta vez o tamanho do que a câmera vê.
+                         // Desce sempre que o zoom abre mais: o mundo é gerado
+                         // no tamanho TOTALMENTE expandido, então ZOOM_MIN e
+                         // MUNDO_MULT multiplicam juntos a memória das nuvens
 
   /* movimento (em pixels de TELA por quadro: o mundo já compensa o zoom) */
   ACEL: 0.34,
@@ -71,12 +71,12 @@ const CFG = {
   VEL_PERDA: 0.025,       // perda de velocidade aparente por nível
 
   /* sucção */
-  /* Caiu de 3,6 ao mesmo tempo em que o personagem cresceu. O alcance é
-     MÚLTIPLO do raio, então um boneco maior multiplica a área de coleta
-     sozinho. Medido em 4 partidas de cada: com 3,6 a partida caía para 54 s
-     (era 84 s); com 2,9 fica em 74 s, perto do ritmo de antes. */
-  ALCANCE_SUCCAO: 2.9,   // raio de atração, em múltiplos do raio do buraco
-  FORCA_SUCCAO: 0.17,
+  /* O alcance é MÚLTIPLO do raio, então o personagem maior já multiplica a
+     área de coleta sozinho. Foi de 3,6 para 2,2 no mesmo movimento em que ele
+     cresceu — e a força do puxão desceu junto, senão o que entra no alcance
+     ainda chega rápido demais. */
+  ALCANCE_SUCCAO: 2.2,   // raio de atração, em múltiplos do raio do buraco
+  FORCA_SUCCAO: 0.13,
   GIRO_SUCCAO: 1.2,      // quanto a estrela rodopia enquanto é sugada
 
   /* Terra */
