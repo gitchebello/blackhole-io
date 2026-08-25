@@ -359,14 +359,17 @@ const COR = CFG.ESCURO ? PALETAS.escuro : PALETAS.claro;
 
    Os painéis e as bordas de barra vão junto porque são chapadas claras: sobre
    preto elas viravam manchas brancas maiores que qualquer personagem. */
-/* A escada da nuvem foi refeita com os DOIS primeiros degraus quase colados
-   no céu e um salto forte só no fim. Antes ela subia parelha do preto ao
-   branco e os degraus do meio — cinzas médios — cobriam boa parte da nuvem;
-   era isso que sujava a tela, porque cinza médio não é nem vazio nem gás.
-   Agora a franja some no escuro e o miolo acende de verdade.
-   O tom não é cinza puro: um leve violeta dá a saturação que o preto absoluto
-   não tem, e ainda assim o cenário continua sem competir com as cores do jogo. */
-const NUVEM_PB = ["#040309","#070513","#0e0a22","#1d1547","#463490","#cfc4f0"];
+/* Preto e branco de verdade, sem tingir. A tentativa anterior levava um
+   violeta "para dar vida" e o resultado foi o oposto: a nuvem virou uma mancha
+   colorida disputando com os personagens, que é justamente o que este modo
+   existe para evitar.
+
+   O que faz a nuvem ficar limpa não é o matiz, é ONDE a escada acende. Os
+   quatro primeiros degraus ficam praticamente no preto — a franja pontilhada
+   desaparece no vazio em vez de virar chuvisco cinza — e só os dois últimos
+   sobem, direto para o branco. O resultado é um miolo aceso com queda curta,
+   que é como nebulosa se parece de longe. */
+const NUVEM_PB = ["#030303","#070707","#0d0d0d","#181818","#5a5a5a","#f2f2f2"];
 const FUNDO_PB = {
   vazio:  "#020207",
   nebs: [NUVEM_PB, NUVEM_PB, NUVEM_PB, NUVEM_PB],
