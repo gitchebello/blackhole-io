@@ -70,13 +70,13 @@ const CFG = {
   GIRO_SUCCAO: 1.2,      // quanto a estrela rodopia enquanto é sugada
 
   /* Terra */
-  TERRA_RAIO: 9,         // raio aparente da Terra, na tela
+  TERRA_RAIO: 6,         // raio aparente da Terra, na tela
   TERRA_ESPERA: 600,     // quadros até uma nova Terra aparecer (600 = 10s)
   TERRA_TURBO: 600,      // duração do turbo (600 = 10s)
   TERRA_FATOR: 1.5,      // multiplicador de velocidade do turbo
 
   /* Marte — o planeta vermelho: vira ímã por um tempo */
-  MARTE_RAIO: 9,         // do mesmo tamanho da Terra
+  MARTE_RAIO: 6,         // do mesmo tamanho da Terra
   MARTE_ESPERA: 600,     // mesma frequência da Terra (600 = 10s)
   MARTE_IMA: 300,        // duração do ímã (300 = 5s)
   MARTE_ALCANCE: 1.35,   // quanto o alcance de sucção estica no ímã
@@ -84,7 +84,7 @@ const CFG = {
   MARTE_CLARAO: 24,      // flash vermelho ao devorá-lo
 
   /* Saturno — o dos anéis: vira uma torre de gelo por um tempo */
-  SATURNO_RAIO: 9,
+  SATURNO_RAIO: 6,
   SATURNO_ESPERA: 600,   // mesma frequência da Terra e de Marte (600 = 10s)
   SATURNO_TIRO: 480,     // duração do poder (480 = 8s)
   SATURNO_CADENCIA: 40,  // quadros entre um bloco e o outro
@@ -98,7 +98,7 @@ const CFG = {
   SATURNO_CLARAO: 24,
 
   /* Júpiter — o gigante roxo: rouba estrelas de perto */
-  JUPITER_RAIO: 9,
+  JUPITER_RAIO: 6,
   JUPITER_ESPERA: 600,   // mesma frequência dos outros planetas
   JUPITER_DRENO: 600,    // duração do poder (600 = 10s)
   JUPITER_RITMO: 20,     // 3 estrelas por segundo
@@ -106,7 +106,7 @@ const CFG = {
   JUPITER_CLARAO: 26,
 
   /* Netuno — o azul profundo: escudo total por um tempo */
-  NETUNO_RAIO: 9,
+  NETUNO_RAIO: 6,
   NETUNO_ESPERA: 600,    // mesma frequência dos outros planetas
   NETUNO_IMUNE: 600,     // 10s sem levar golpe nenhum
   NETUNO_CLARAO: 26,
@@ -147,7 +147,6 @@ const CFG = {
   COLISAO_ESPERA: 50,    // quadros de carência para não trombar em sequência
   COLISAO_SURPRESA: 50,  // quadros de cara de espanto depois da pancada
   ANUNCIO: 80,           // quadros que o aviso do efeito fica na tela
-  PERDA_ESPERA: 48,      // janela para juntar estrelas perdidas num aviso só
   COLISAO_TREMOR: 52,
   COLISAO_ABERR: 44,
   COLISAO_CUSTA_NIVEL: true,   // a perda também tira progresso, não só o contador
@@ -765,69 +764,56 @@ const mancha = (nx, ny, cx, cy, rx, ry) => {
   return a * a + b * b < 1;
 };
 
-/* Terra: oceano, alguns continentes e as calotas */
+/* Cinco escadas de CINCO tons, e não sete: num disco de 13 px, sete degraus
+   viram ruído — degraus vizinhos caem no mesmo pixel e o planeta fica sujo.
+   Cada planeta tem no máximo DUAS manchas. Elas são grandes de propósito:
+   detalhe pequeno nesse tamanho vira poeira, não desenho. */
+
+/* Terra: oceano e dois continentes */
 const TERRA_D = CFG.TERRA_RAIO * 2 + 1;
 const terraSprite = fazerPlaneta(CFG.TERRA_RAIO, [
-  ["#e8f7ff","#a9d8f2","#6fb4e0","#4a90c8","#2f6ea6","#1d4c7a","#123354"],  // oceano
-  ["#eafbe8","#a7e3b4","#6cc98c","#46a86a","#2f8450","#20603a","#144026"],  // terra
-  ["#ffffff","#eef9ff","#d2ecf8","#b0d8ec","#8ebdd6","#6c9cb8","#4d7793"]   // gelo
+  ["#d8f0ff","#8ec8ee","#4a90c8","#28588c","#123354"],   // oceano
+  ["#dcf8dc","#8fd9a4","#46a86a","#256b42","#144026"]    // terra
 ], (nx, ny) => {
-  if (Math.abs(ny) > 0.78) return 2;
-  if (mancha(nx, ny, -0.3, -0.18, 0.42, 0.34)) return 1;
-  if (mancha(nx, ny, 0.34, 0.3, 0.34, 0.4)) return 1;
-  if (mancha(nx, ny, 0.15, -0.52, 0.26, 0.2)) return 1;
+  if (mancha(nx, ny, -0.3, -0.16, 0.46, 0.42)) return 1;
+  if (mancha(nx, ny, 0.34, 0.34, 0.4, 0.4)) return 1;
   return 0;
 });
 
-/* Marte: poeira vermelha, um mar escuro e a calota norte */
+/* Marte: poeira e um mar escuro */
 const MARTE_D = CFG.MARTE_RAIO * 2 + 1;
 const marteSprite = fazerPlaneta(CFG.MARTE_RAIO, [
-  ["#ffd2b0","#ff9e70","#f2683f","#d9472a","#b2321d","#872314","#5c150c"],  // poeira
-  ["#e0a184","#bb6448","#98422c","#79301e","#5c2013","#40140b","#2a0c06"],  // mar
-  ["#ffffff","#f6ece8","#e2d0c8","#c9b0a6","#a98d84","#886c64","#664e48"]   // calota
-], (nx, ny) => {
-  if (ny < -0.8) return 2;
-  if (mancha(nx, ny, 0.12, 0.28, 0.5, 0.3)) return 1;
-  return 0;
-});
+  ["#ffd0ac","#ff9264","#e2512f","#a82c19","#5c150c"],   // poeira
+  ["#dfa080","#b25c40","#833021","#5a1d12","#310c06"]    // mar
+], (nx, ny) => mancha(nx, ny, 0.16, 0.26, 0.52, 0.36) ? 1 : 0);
 
-/* Júpiter: faixas largas e a mancha */
+/* Júpiter: duas faixas e a mancha */
 const JUP_D = CFG.JUPITER_RAIO * 2 + 1;
 const jupiterSprite = fazerPlaneta(CFG.JUPITER_RAIO, [
-  ["#fbf4ff","#e9d8fb","#d0b6f2","#b492e2","#9370c4","#6f5199","#4b356b"],  // clara
-  ["#e4d0f8","#bd9ce6","#9673cc","#7355aa","#553d84","#3b2a5e","#251a3d"],  // escura
-  ["#ffdce8","#f5a8bf","#dd7b98","#b85a78","#8f4159","#682d3e","#451c28"]   // mancha
+  ["#f7eeff","#dcc4f6","#b492e2","#7d5cae","#4b356b"],   // clara
+  ["#e0c9f6","#b48fdf","#8464bc","#573f88","#2e2049"],   // escura
+  ["#ffd8e6","#f0a0b8","#c96e8a","#96455c","#5a2434"]    // mancha
 ], (nx, ny) => {
-  if (mancha(nx, ny, 0.24, 0.22, 0.22, 0.15)) return 2;
-  // três faixas largas, com uma ondulação de leve: reta perfeita vira
-  // código de barras, e o planeta perde o ar de gás em movimento
-  const f = Math.abs(ny + 0.05 * Math.sin(nx * 3.2));
-  if (f < 0.16 || (f > 0.42 && f < 0.66)) return 1;
-  return 0;
+  if (mancha(nx, ny, 0.22, 0.24, 0.3, 0.2)) return 2;
+  return Math.abs(ny + 0.06 * Math.sin(nx * 2.6)) > 0.34 ? 1 : 0;
 });
 
-/* Saturno: creme com duas faixas suaves */
+/* Saturno: duas faixas, e o anel faz o resto */
 const SAT_D = CFG.SATURNO_RAIO * 2 + 1;
 const saturnoSprite = fazerPlaneta(CFG.SATURNO_RAIO, [
-  ["#fffdf2","#fff0cc","#f8dda2","#e8c47e","#cba25a","#a17a3e","#6f5027"],
-  ["#fdf3dc","#f2dca6","#dfc077","#c4a054","#a17f3c","#7b5f2a","#52401b"]
-], (nx, ny) => {
-  const f = Math.abs(ny + 0.04 * Math.sin(nx * 2.6));
-  return (f > 0.2 && f < 0.44) || f > 0.7 ? 1 : 0;
-});
+  ["#fffcee","#fbe7b6","#e8c47e","#bb9250","#6f5027"],
+  ["#f9eed4","#eed399","#cfa965","#a17f3c","#52401b"]
+], (nx, ny) => Math.abs(ny + 0.05 * Math.sin(nx * 2.2)) > 0.3 ? 1 : 0);
 
-/* Netuno: azul profundo com uma mancha */
+/* Netuno: duas faixas e uma mancha escura */
 const NET_D = CFG.NETUNO_RAIO * 2 + 1;
 const netunoSprite = fazerPlaneta(CFG.NETUNO_RAIO, [
-  ["#e6f4ff","#b4d8f8","#7cb0ea","#5389cf","#3765a8","#22467c","#132b52"],
-  ["#c2dbf5","#7fabdd","#5182bc","#345f97","#204373","#132b50","#0a1a33"],
-  // bem mais escura que o corpo: no azul, mancha clara lê como falha de
-  // desenho, e não como acidente na atmosfera
-  ["#5c7ba0","#3e5c82","#2a4467","#1b3050","#11213a","#0a1526","#050b16"]   // mancha
+  ["#dcefff","#9cc8f4","#5389cf","#2a5088","#132b52"],
+  ["#bcd8f2","#75a2d6","#3d68ac","#1d3c68","#0a1a33"],
+  ["#5c7ba0","#3a5680","#22406a","#142a48","#060d18"]    // mancha
 ], (nx, ny) => {
-  if (mancha(nx, ny, -0.2, -0.06, 0.22, 0.15)) return 2;
-  const f = Math.abs(ny + 0.045 * Math.sin(nx * 2.9));
-  return (f > 0.26 && f < 0.5) ? 1 : 0;
+  if (mancha(nx, ny, -0.22, -0.1, 0.3, 0.22)) return 2;
+  return Math.abs(ny + 0.05 * Math.sin(nx * 2.4)) > 0.36 ? 1 : 0;
 });
 
 /* ── desenho em pixel cheio (sem antialias) ──────────────────── */
@@ -1092,8 +1078,8 @@ let primeiro = null;    // quem está com mais estrelas; ganha a coroa
 /* Quanto o inimigo já tirou de você, por origem. O dreno e o gelo tiram de
    pouco em pouco — anunciar cada estrela viraria um piscar sem sentido —,
    então acumulam e o total sai quando a agressão para. */
-let perdaAcum = { dreno: 0, gelo: 0 }, perdaEspera = { dreno: 0, gelo: 0 };
-let ganhoDreno = 0, ganhoEspera = 0;   // o que VOCÊ tirou dos outros no dreno
+let perdaAcum = { dreno: 0, gelo: 0 };
+let ganhoDreno = 0;     // o que VOCÊ tirou dos outros no dreno
 let coroaAnim = 0;      // 1 no instante em que a coroa troca de cabeça
 const cam = { x: 0, y: 0 };
 
@@ -1227,8 +1213,8 @@ function reiniciar() {
   arco = 0; turbo = 0; esperaColisao = 0; expansao = 0;
   historico = []; quadroInicio = quadro;
   primeiro = null; coroaAnim = 0;
-  perdaAcum = { dreno: 0, gelo: 0 }; perdaEspera = { dreno: 0, gelo: 0 };
-  ganhoDreno = 0; ganhoEspera = 0;
+  perdaAcum = { dreno: 0, gelo: 0 };
+  ganhoDreno = 0;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
   buraco.enjoo = 0; buraco.surpresa = 0; buraco.fervor = 0;
@@ -1852,9 +1838,10 @@ function adoecer(p) {
   // o cometa não só atrasa: derruba estrelas na batida
   const cai = Math.min(CFG.COMETA_ESTRELAS, p.comidas);
   if (cai > 0) {
-    perderEstrelas(p, cai, "cometa");
+    perderEstrelas(p, cai);            // sem origem: o aviso sai junto do rótulo
     for (let k = 0; k < cai; k++) estrelas.push(estrelaSolta(p, k, cai));
   }
+  p.perdeuNoCometa = cai;
   p.pulso = 1; p.boca = 24;
   bafo(p.x, p.y, 30, 1.6);
   aneis.push({ x: p.x, y: p.y, r: 3, vida: 20, total: 20, rival: p !== buraco,
@@ -1862,9 +1849,10 @@ function adoecer(p) {
   // a pancada também freia na hora: senão o congelamento demora a ser sentido
   p.vx *= 0.4; p.vy *= 0.4;
   if (p !== buraco) return;
-  // o "-5" sai primeiro em adoecer(); o SPEED DOWN entra logo depois e fica,
-  // então o jogador lê a perda e em seguida o motivo
-  anunciar("SPEED DOWN", COR.enjoo);
+  // o custo entra como segunda linha do próprio aviso: dois anúncios em
+  // sequência faziam o primeiro sumir antes de ser lido
+  anunciar("SPEED DOWN", COR.enjoo, false,
+           p.perdeuNoCometa > 0 ? "-" + p.perdeuNoCometa + " estrelas" : null);
   tremor = 30;                                  // batida: sacode mais
   aberr = CFG.ABERRACAO;
   flashEnjoo = 26;
@@ -2344,27 +2332,41 @@ function subiuDeNivel(dono) {
 
 /* Perder massa: sai do contador e volta do progresso, devolvendo nível se
    preciso — senão a trombada seria só um número piscando. */
-/* Junta as estrelas que o inimigo tirou de você e solta o total quando ele
-   para. `CFG.PERDA_ESPERA` é a janela: hits dentro dela contam como a mesma
-   investida. */
+/* Junta as estrelas que o inimigo tirou de você. O total sai quando o PODER
+   DELE acaba, não quando ele para de acertar: sair do alcance por um segundo
+   fechava a conta no meio e o jogador recebia dois ou três avisos por uma
+   ativação só. */
 function anotarPerda(origem, n) {
   perdaAcum[origem] += n;
-  perdaEspera[origem] = CFG.PERDA_ESPERA;
+}
+
+/* algum rival ainda está com o poder ligado, ou com coisa a caminho? */
+function dreanandoAlguem() {
+  return rivais.some(r => r.dreno > 0) ||
+         roubadas.some(e => e.para !== buraco);
+}
+function atirandoAlguem() {
+  return rivais.some(r => r.tiro > 0) ||
+         blocos.some(g => g.alvo === buraco);
 }
 
 function passoPerdas() {
-  if (ganhoEspera > 0 && --ganhoEspera <= 0) {
-    if (ganhoDreno > 0) anunciar("+" + ganhoDreno + "!", COR.roxo);
+  // o que VOCÊ absorveu: fecha quando o seu dreno acaba e a última estrela
+  // roubada já chegou — elas ainda estão voando quando o tempo zera
+  if (ganhoDreno > 0 && buraco.dreno <= 0 &&
+      !roubadas.some(e => e.para === buraco)) {
+    anunciar("+" + ganhoDreno + "!", COR.roxo);
     ganhoDreno = 0;
   }
-  for (const k in perdaEspera) {
-    if (perdaEspera[k] <= 0) continue;
-    if (--perdaEspera[k] > 0) continue;
-    if (perdaAcum[k] > 0) {
-      anunciar("-" + perdaAcum[k], k === "dreno" ? COR.roxo : COR.bloco[3]);
-      SFX.perda();
-    }
-    perdaAcum[k] = 0;
+  if (perdaAcum.dreno > 0 && !dreanandoAlguem()) {
+    anunciar("-" + perdaAcum.dreno, COR.roxo);
+    SFX.perda();
+    perdaAcum.dreno = 0;
+  }
+  if (perdaAcum.gelo > 0 && !atirandoAlguem()) {
+    anunciar("-" + perdaAcum.gelo, COR.bloco[3]);
+    SFX.perda();
+    perdaAcum.gelo = 0;
   }
 }
 
@@ -2382,7 +2384,6 @@ function perderEstrelas(dono, n, origem) {
   if (dono === buraco && origem && antes > dono.comidas) {
     const tirou = antes - dono.comidas;
     if (origem === "trombada") anunciar("-" + tirou, COR.disco[6]);
-    else if (origem === "cometa") anunciar("-" + tirou, COR.enjoo);
     else anotarPerda(origem, tirou);
   }
   if (!CFG.COLISAO_CUSTA_NIVEL) return;
@@ -2587,7 +2588,7 @@ function passoRoubadas() {
       ganharEstrelas(p, 1);
       // o total é contado na CHEGADA, não no arranque: as últimas estrelas
       // ainda estão voando quando o poder acaba, e elas contam
-      if (p === buraco) { ganhoDreno++; ganhoEspera = CFG.PERDA_ESPERA; SFX.dreno(); }
+      if (p === buraco) { ganhoDreno++; SFX.dreno(); }
       p.pulso = 1; p.boca = 16;
       aneis.push({ x: p.x, y: p.y, r: 2, vida: 14, total: 14, rival: p !== buraco, pal: p !== buraco ? paletaDe(p).disco : null });
       faiscar(p.x, p.y, 8, 3, 8);
@@ -3564,8 +3565,9 @@ function desenharMarcaRival() {
 /* Aviso do efeito no meio da tela. Entra estufando, sobe devagar e some.
    O brilho é o próprio texto repetido em volta com alfa baixo — o contorno
    branco do texto() sozinho não separa a letra de um fundo colorido. */
-function anunciar(txt, cor, iris) {
-  anuncio = { txt: txt, cor: cor, vida: CFG.ANUNCIO, total: CFG.ANUNCIO, iris: !!iris };
+function anunciar(txt, cor, iris, sub) {
+  anuncio = { txt: txt, cor: cor, vida: CFG.ANUNCIO, total: CFG.ANUNCIO,
+              iris: !!iris, sub: sub || null };
 }
 
 /* Escreve letra a letra em arco-íris, as cores correndo pela palavra. Só o
@@ -3615,6 +3617,14 @@ function desenharAnuncio() {
       desenhaGlifos(anuncio.txt, x, y + d, anuncio.cor, tam);
     }
   }
+  // segunda linha, menor, logo abaixo: serve para o efeito e o seu custo
+  // aparecerem juntos em vez de um empurrar o outro da tela
+  if (anuncio.sub) {
+    const ls = larguraTexto(anuncio.sub, 1);
+    ctx.globalAlpha = a * 0.9;
+    texto(anuncio.sub, Math.round((VL - ls) / 2), y + FONTE_H * tam + 3, anuncio.cor, 1);
+  }
+
   ctx.globalAlpha = a;
   if (anuncio.iris) {
     // contorno primeiro, depois as letras coloridas por cima
