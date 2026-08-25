@@ -122,6 +122,10 @@ const CFG = {
   RIVAIS: 1,             // quantos oponentes entram em campo (1 a 3)
   RIVAIS_MAX: 3,
   RIVAL_DISTANCIA: 2.4,  // quão perto ele chega ao caçar, em encostões
+  RIVAL_MARGEM: 8,       // quantas estrelas a mais ele precisa ter para
+                         // achar que vale a pena ir para cima de alguém
+  RIVAL_CACADA: 0.8,     // e a que distância procura vítima, em telas
+  RIVAL_TEIMOSIA: 100,   // quadros que ele insiste na vítima escolhida
 
   /* efeito da Terra */
   TERRA_CLARAO: 30,      // duração do flash azul ao devorá-la
@@ -172,6 +176,8 @@ const CFG = {
   ESPIRAL_ALCANCE: 0.33,  // quanto o alcance de sucção estica no máximo
   ESPIRAL_FORCA: 0.48,    // e quanto o puxão fica mais firme
   ESPIRAL_PLANETA: 0.15,  // com que força os planetas vêm junto
+  ESPIRAL_GIRO: 0.15,     // torção da imagem no redemoinho, em radianos
+  ESPIRAL_PUXA: 0.055,    // e o quanto ela é sugada para o centro
   RAIO_ANALOG: 22,
   ESCURO: false,         // versão escura: fundo preto e estrelas brancas
   SEMENTE: 20260823
@@ -222,6 +228,13 @@ const PALETAS = {
     roxo:    "#9a6fd4",
     roxoClarao:"#e6d6f7",
     glowJupiter:"#8a63c6",
+    /* contorno de cada planeta: um fio saturado da própria família, para a
+       bolinha cravar contra o fundo claro em vez de derreter nele */
+    contTerra:"#1f5c94",
+    contMarte:"#7a0f10",
+    contSaturno:"#8a6520",
+    contJupiter:"#4e2f80",
+    contNetuno:"#071634",
     netuno: ["#4a86c8","#2f63a8","#1d4585","#122e63","#0a1c42"],
     netunoTexto:"#0d2352",   // azul bem escuro, para o aviso de invencível
     glowNetuno:"#1d4585",
@@ -289,6 +302,11 @@ const PALETAS = {
     roxo:    "#b088e8",
     roxoClarao:"#2a1a44",
     glowJupiter:"#9a6fd4",
+    contTerra:"#7fc4f0",
+    contMarte:"#ff6a52",
+    contSaturno:"#ffd980",
+    contJupiter:"#c9a6f5",
+    contNetuno:"#4a86c8",
     netuno: ["#4a86c8","#2f63a8","#1d4585","#122e63","#0a1c42"],
     netunoTexto:"#0d2352",   // azul bem escuro, para o aviso de invencível
     glowNetuno:"#1d4585",
@@ -1310,7 +1328,7 @@ function reiniciar() {
   historico = []; quadroInicio = quadro;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
-  buraco.enjoo = 0; buraco.surpresa = 0;
+  buraco.enjoo = 0; buraco.surpresa = 0; buraco.fervor = 0;
   estrelas = [];
   for (let i = 0; i < alvoEstrelas(); i++) estrelas.push(novaEstrela(buraco));
   rivais = TODOS_RIVAIS.slice(0, limitar(CFG.RIVAIS, 1, CFG.RIVAIS_MAX));
@@ -1319,7 +1337,8 @@ function reiniciar() {
     const r = rivais[i];
     r.nivel = 0; r.comidas = 0; r.progresso = 0;
     r.vx = r.vy = 0; r.pulso = 0; r.boca = 0; r.atordoado = 0;
-    r.alvo = null; r.pensar = 0; r.enjoo = 0; r.surpresa = 0;
+    r.alvo = null; r.pensar = 0; r.enjoo = 0; r.surpresa = 0; r.fervor = 0;
+    r.presa = null; r.perseguindo = 0;
     r.tiro = 0; r.recargaTiro = 0; r.dreno = 0; r.ritmoDreno = 0; r.imune = 0;
     // espalhados em leque à mesma distância: ninguém começa com vantagem
     const a = -Math.PI / 2 + (i + 1) / (rivais.length + 1) * Math.PI * 2;
@@ -1487,6 +1506,25 @@ function passoRival(rival, L) {
   // não seja ele — atacar quem está na frente é o que mantém a corrida viva
   const caçando = rival.tiro > 0 || rival.dreno > 0;
   const presa = caçando ? lider(rival) : null;
+  // Sem poder na mão, ainda há um motivo para procurar briga: na trombada
+  // quem tem MENOS estrela é que paga. Se ele está por cima com folga, ir
+  // para cima de alguém menor é lucro certo — e é o que faz a liderança
+  // pesar em vez de só correr atrás de estrela
+  // Sem teimosia ele reavalia a cada quadro e volta a catar estrela assim que
+  // a vítima se afasta um pouco — a investida nunca se completa. Escolhida a
+  // presa, ele insiste por um tempo
+  if (rival.perseguindo > 0) rival.perseguindo--;
+  let vitima = null;
+  if (!caçando && esperaColisao <= 0 && rival.imune <= 0) {
+    if (rival.perseguindo > 0 && rival.presa &&
+        rival.comidas - rival.presa.comidas >= CFG.RIVAL_MARGEM &&
+        rival.presa.imune <= 0) {
+      vitima = rival.presa;
+    } else {
+      vitima = presaFraca(rival);
+      if (vitima) { rival.presa = vitima; rival.perseguindo = CFG.RIVAL_TEIMOSIA; }
+    }
+  }
   const vivo = rival.alvo && (rival.alvo === terra || rival.alvo === marte ||
                               rival.alvo === saturno || rival.alvo === jupiter ||
                               rival.alvo === netuno || rival.alvo === buraco ||
@@ -1494,6 +1532,9 @@ function passoRival(rival, L) {
                               estrelas.indexOf(rival.alvo) >= 0);
   if (caçando && presa) {
     rival.alvo = presa;
+    rival.pensar = 1;
+  } else if (vitima) {
+    rival.alvo = vitima;
     rival.pensar = 1;
   } else if (--rival.pensar <= 0 || !vivo) {
     rival.pensar = CFG.RIVAL_PENSAR + Math.floor(Math.random() * CFG.RIVAL_PENSAR);
@@ -1509,8 +1550,8 @@ function passoRival(rival, L) {
   if (rival.alvo) {
     const dx = rival.alvo.x - rival.x, dy = rival.alvo.y - rival.y;
     rival.ang = Math.atan2(dy, dx) + (Math.random() - 0.5) * CFG.RIVAL_MIRA;
-    // caçando, ele mantém distância de tiro em vez de colar: encostar dispara
-    // a trombada, e na trombada quem tem menos estrela é que paga
+    // com poder na mão ele mantém distância de tiro em vez de colar; indo
+    // trombar, é o contrário — quer o encostão
     if (caçando) {
       const d = Math.hypot(dx, dy);
       const outroR = rival.alvo === buraco ? raioMundo() : raioMundoNivel(rival.alvo.nivel);
@@ -1535,6 +1576,21 @@ function passoRival(rival, L) {
   if (rival.y < L.y0 + m) { rival.y = L.y0 + m; rival.vy = Math.abs(rival.vy); }
   if (rival.x > L.x1 - m) { rival.x = L.x1 - m; rival.vx = -Math.abs(rival.vx); }
   if (rival.y > L.y1 - m) { rival.y = L.y1 - m; rival.vy = -Math.abs(rival.vy); }
+}
+
+/* O alvo de uma trombada proposital: o mais próximo que tenha bem menos
+   estrela, esteja perto e não esteja de escudo. Sem a margem, dois quase
+   empatados ficariam se perseguindo e a trombada viraria loteria. */
+function presaFraca(quem) {
+  const alcance = visaoL() * CFG.RIVAL_CACADA;
+  let melhor = null, md = Infinity;
+  for (const p of todos()) {
+    if (p === quem || p.imune > 0) continue;
+    if (quem.comidas - p.comidas < CFG.RIVAL_MARGEM) continue;
+    const d = Math.hypot(p.x - quem.x, p.y - quem.y);
+    if (d < md && d < alcance) { md = d; melhor = p; }
+  }
+  return melhor;
 }
 
 /* o adversário visível mais próximo — é em quem o jogador acerta sem escolher */
@@ -1594,7 +1650,7 @@ function trombada(a, b, ux, uy) {
     if (p.imune > 0) escudou(p, p.x, p.y);
     p.pulso = 1;
     p.surpresa = CFG.COLISAO_SURPRESA;
-    if (p !== buraco) p.alvo = null;      // ele reavalia depois do tranco
+    if (p !== buraco) { p.alvo = null; p.perseguindo = 0; }  // reavalia depois do tranco
   }
 
   const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
@@ -2110,7 +2166,11 @@ function passoParticulas() {
     a.r += 1.1 / zoom;
     if (--a.vida <= 0) aneis.splice(i, 1);
   }
-  for (const p of todos()) p.pulso *= 0.85;
+  for (const p of todos()) {
+    p.pulso *= 0.85;
+    // esfria devagar: engolir em sequência mantém o disco aceso, parar apaga
+    p.fervor = (p.fervor || 0) * 0.978;
+  }
   if (buraco.boca > 0) buraco.boca--;
   for (const r of rivais) if (r.boca > 0) r.boca--;
   if (flashTerra > 0) flashTerra--;
@@ -2238,6 +2298,8 @@ function engolirEstrela(indice, dono) {
   estrelas.splice(indice, 1);
   if (cena !== "jogo") return;          // no menu ele come só de enfeite
   dono.pulso = 1; dono.boca = 18;
+  // marca o quanto ele está comendo agora: o disco de acreção lê disso
+  dono.fervor = Math.min(1.6, (dono.fervor || 0) + 0.45);
   aneis.push({ x: e.x, y: e.y, r: 2, vida: 15, total: 15, rival: dono !== buraco,
                pal: dono !== buraco ? paletaDe(dono).disco : null });
   if (dono === buraco && Math.random() < 0.28) soltarCoracoes(e.x, e.y, 1, 0.7, 0);
@@ -2609,6 +2671,7 @@ function desenharMundo() {
       const pT = 0.5 + 0.5 * Math.sin(quadro * 0.055);
       brilho(cxT2, cyT2, CFG.TERRA_RAIO - 1, CFG.TERRA_RAIO + 7 + pT * 2,
              COR.glowTerra, 0.3 + pT * 0.12, 2.4);
+      anel(x + CFG.TERRA_RAIO, y + CFG.TERRA_RAIO, CFG.TERRA_RAIO + 1, 1.2, COR.contTerra);
       const q = Math.floor(terra.quadro / 7) % TERRA_QUADROS;
       ctx.drawImage(terraSprite, q * TERRA_D, 0, TERRA_D, TERRA_D, x, y, TERRA_D, TERRA_D);
     }
@@ -2624,6 +2687,7 @@ function desenharMundo() {
       const pM = 0.5 + 0.5 * Math.sin(quadro * 0.075 + 1.3);
       brilho(cxM2, cyM2, CFG.MARTE_RAIO - 1, CFG.MARTE_RAIO + 8 + pM * 2,
              COR.glowMarte, 0.34 + pM * 0.14, 2.2);
+      anel(x + CFG.MARTE_RAIO, y + CFG.MARTE_RAIO, CFG.MARTE_RAIO + 1, 1.2, COR.contMarte);
       const q = Math.floor(marte.quadro / 7) % MARTE_QUADROS;
       ctx.drawImage(marteSprite, q * MARTE_D, 0, MARTE_D, MARTE_D, x, y, MARTE_D, MARTE_D);
     }
@@ -2638,6 +2702,7 @@ function desenharMundo() {
       const pS = 0.5 + 0.5 * Math.sin(quadro * 0.062 + 2.4);
       brilho(cxS, cyS, R - 1, R + 7 + pS * 2, COR.glowSaturno, 0.3 + pS * 0.12, 2.4);
       anelSaturno(cxS, cyS, R, false);          // metade de trás
+      anel(cxS, cyS, R + 1, 1.2, COR.contSaturno);
       const q = Math.floor(saturno.quadro / 7) % SAT_QUADROS;
       ctx.drawImage(saturnoSprite, q * SAT_D, 0, SAT_D, SAT_D, cxS - R, cyS - R, SAT_D, SAT_D);
       anelSaturno(cxS, cyS, R, true);           // metade da frente
@@ -2661,6 +2726,7 @@ function desenharMundo() {
       }
       const pJ = 0.5 + 0.5 * Math.sin(quadro * 0.058 + 3.7);
       brilho(cxJ, cyJ, R - 1, R + 7 + pJ * 2, COR.glowJupiter, 0.28 + pJ * 0.1, 2.4);
+      anel(cxJ, cyJ, R + 1, 1.2, COR.contJupiter);
       const q = Math.floor(jupiter.quadro / 7) % JUP_QUADROS;
       ctx.drawImage(jupiterSprite, q * JUP_D, 0, JUP_D, JUP_D, cxJ - R, cyJ - R, JUP_D, JUP_D);
     }
@@ -2674,6 +2740,7 @@ function desenharMundo() {
     if (cxN > -R * 4 && cyN > -R * 4 && cxN < VL + R * 4 && cyN < VA + R * 4) {
       const pN = 0.5 + 0.5 * Math.sin(quadro * 0.05 + 1.9);
       brilho(cxN, cyN, R - 1, R + 7 + pN * 2, COR.glowNetuno, 0.3 + pN * 0.12, 2.4);
+      anel(cxN, cyN, R + 1, 1.2, COR.contNetuno);
       const q = Math.floor(netuno.quadro / 7) % NET_QUADROS;
       ctx.drawImage(netunoSprite, q * NET_D, 0, NET_D, NET_D, cxN - R, cyN - R, NET_D, NET_D);
     }
@@ -2820,30 +2887,52 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
     ctx.globalAlpha = 1;
   }
 
-  // anel de acreção: duas voltas, fortes de um lado e apagadas do outro
-  // no modo sucção o disco acelera junto: é a leitura de "estou girando ele"
-  const acel = comTurbo ? 1 + espiral * 2.6 : 1;
+  /* Anel de acreção: o mesmo desenho de sempre — duas voltas, fortes de um
+     lado e apagadas do outro — com três coisas somadas por cima conforme o
+     personagem está COMENDO (`fervor`, que sobe a cada estrela e esfria
+     sozinho): gira mais rápido, ganha um halo, e as voltas anteriores ficam
+     na tela com alfa baixo, o que dá o rastro circular. Parado e sem comer,
+     tudo isso vai a zero e sobra o anel limpo de antes. */
+  const fervor = Math.min(1, p.fervor || 0);
+  const acel = (comTurbo ? 1 + espiral * 2.6 : 1) * (1 + fervor * 0.9);
   const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04) * acel;
   const N = paleta.length;
   const iris = p.imune > 0;
-  for (let k = 0; k < 2; k++) {
-    const rr = r + 1 + k;
-    const passos = Math.max(20, Math.ceil(rr * 7));
-    for (let i = 0; i < passos; i++) {
-      const a = (i / passos) * Math.PI * 2;
-      const lado = 0.5 + 0.5 * Math.sin(a - giro);
-      const inten = (0.34 + 0.66 * lado) * (1 - k * 0.3);
-      if (inten < 0.3) continue;
-      // no arco-íris a cor vem do ÂNGULO, não da intensidade: é o que faz as
-      // faixas girarem junto com o anel em vez de ficarem paradas
-      const cor = iris
-        ? COR.arcoiris[Math.floor(((a - giro * 1.6) / (Math.PI * 2) * COR.arcoiris.length
-                                   % COR.arcoiris.length + COR.arcoiris.length))
-                       % COR.arcoiris.length]
-        : paleta[Math.min(N - 1, Math.floor(inten * N))];
-      px(bx + Math.cos(a) * rr, by + Math.sin(a) * rr, cor);
+
+  if (fervor > 0.04) {                     // halo que acende junto
+    // cor saturada do próprio disco, e não o halo pálido: por cima de uma
+    // nebulosa da mesma família, o pálido sumia e só lavava a região
+    brilho(bx, by, r, r + 3 + fervor * 5, iris ? COR.arcoiris[4] : paleta[5],
+           0.09 + fervor * 0.26, 2.4);
+  }
+
+  // rastro: as posições por onde o anel passou, cada vez mais apagadas
+  const rastros = fervor > 0.06 ? 3 : 0;
+  for (let g = rastros; g >= 0; g--) {
+    const atraso = g * (0.12 + fervor * 0.16);
+    const alfa = g === 0 ? 1 : (0.34 - g * 0.08) * fervor;
+    if (alfa <= 0.02) continue;
+    ctx.globalAlpha = alfa;
+    for (let k = 0; k < 2; k++) {
+      const rr = r + 1 + k + (g ? g * 0.5 * fervor : 0);
+      const passos = Math.max(20, Math.ceil(rr * 7));
+      for (let i = 0; i < passos; i++) {
+        const a = (i / passos) * Math.PI * 2;
+        const lado = 0.5 + 0.5 * Math.sin(a - giro + atraso);
+        const inten = (0.34 + 0.66 * lado) * (1 - k * 0.3);
+        if (inten < 0.3) continue;
+        // no arco-íris a cor vem do ÂNGULO, não da intensidade: é o que faz as
+        // faixas girarem junto com o anel em vez de ficarem paradas
+        const cor = iris
+          ? COR.arcoiris[Math.floor(((a - giro * 1.6) / (Math.PI * 2) * COR.arcoiris.length
+                                     % COR.arcoiris.length + COR.arcoiris.length))
+                         % COR.arcoiris.length]
+          : paleta[Math.min(N - 1, Math.floor(inten * N))];
+        px(bx + Math.cos(a) * rr, by + Math.sin(a) * rr, cor);
+      }
     }
   }
+  ctx.globalAlpha = 1;
 
   // o corpo é claro: precisa de um fio de contorno para ter silhueta
   disco(bx, by, r, contorno);
@@ -3557,6 +3646,40 @@ function campoRoxo() {
   ctx.globalAlpha = 1;
 }
 
+/* Redemoinho: durante o modo sucção a imagem inteira é redesenhada algumas
+   vezes girada e encolhida em torno do buraco, com alfa baixo. O empilhamento
+   dá um borrão que é ao mesmo tempo rotacional e radial — é a leitura de
+   "está puxando tudo para dentro", que o anel de riscos sozinho não dava.
+   Cinco cópias com transform custam menos que qualquer coisa por pixel. */
+const bufE = document.createElement("canvas");
+
+function redemoinho() {
+  if (espiral <= 0.03) return;
+  if (bufE.width !== VL || bufE.height !== VA) { bufE.width = VL; bufE.height = VA; }
+  const ex = bufE.getContext("2d");
+  ex.globalCompositeOperation = "source-over";
+  ex.clearRect(0, 0, VL, VA);
+  ex.drawImage(tela, 0, 0);
+
+  const cx = paraTelaX(buraco.x), cy = paraTelaY(buraco.y);
+  const sent = toque.sentido >= 0 ? 1 : -1;
+  const n = 5;
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const ang = sent * espiral * CFG.ESPIRAL_GIRO * t;
+    const esc = 1 - CFG.ESPIRAL_PUXA * espiral * t;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(ang);
+    ctx.scale(esc, esc);
+    ctx.translate(-cx, -cy);
+    ctx.globalAlpha = 0.42 * espiral / n * (1.4 - t);
+    ctx.drawImage(bufE, 0, 0);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function aberracao() {
   if (aberr <= 0) return;
   const forca = aberr / CFG.ABERRACAO;
@@ -3596,6 +3719,7 @@ function desenhar() {
   desenharClaraoEnjoo();
   desenharBrilhoRoxo();
   desenharBrilhoLateral();
+  redemoinho();
   campoRoxo();
   vinheta();
   if (cena === "menu") desenharMenu();
