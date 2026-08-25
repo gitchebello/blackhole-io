@@ -369,9 +369,20 @@ const COR = CFG.ESCURO ? PALETAS.escuro : PALETAS.claro;
    desaparece no vazio em vez de virar chuvisco cinza — e só os dois últimos
    sobem, direto para o branco. O resultado é um miolo aceso com queda curta,
    que é como nebulosa se parece de longe. */
-const NUVEM_PB = ["#030303","#070707","#0d0d0d","#181818","#5a5a5a","#f2f2f2"];
+/* ALL BLACK: sem nuvem nenhuma. As quatro rampas ficam na cor do céu, então
+   a camada de nebulosa continua sendo gerada mas sai lisa — um fundo chapado.
+   Sem estrutura extra: o resto do jogo nem sabe que elas sumiram. */
+const CEU_PB = "#000000";
+const NUVEM_PB = [CEU_PB, CEU_PB, CEU_PB, CEU_PB, CEU_PB, CEU_PB];
 const FUNDO_PB = {
-  vazio:  "#020207",
+  vazio:  CEU_PB,
+  /* O CORPO do personagem vira preto e o traço do rosto vira branco. É a
+     inversão que faltava: um buraco negro branco era o contrassenso do jogo
+     desde o começo, e no fundo preto ele finalmente pode ser preto — o que
+     dá a silhueta é o disco de acreção em volta, que é como a coisa funciona
+     de verdade. Bochecha, disco, planetas e efeitos mantêm a cor. */
+  corpo:  "#07070c",
+  rosto:  "#ffffff",
   nebs: [NUVEM_PB, NUVEM_PB, NUVEM_PB, NUVEM_PB],
   poeira: ["#0c0a16","#110e1e","#171328"],
   estrela: "#ffffff",
@@ -3581,7 +3592,8 @@ function desenharRosto(p, bx, by, r, blush, ex, ey) {
   // enquanto passa mal a bochecha sai de cena: é o que faz o rostinho perder
   // o viço, mais do que a boca virada
   if (t >= 1 && !doente) {
-    ctx.globalAlpha = 0.62;
+    // sobre corpo preto a bochecha em 62% some; ela é o único rosado do rosto
+    ctx.globalAlpha = CFG.FUNDO_PB ? 0.9 : 0.62;
     const dist = sep + olho[0].length / 2 + 1.5;
     carimbo(BOCHECHAS[t], bx - dist * ex + ox, by + r * 0.26 * ey + oy, blush);
     carimbo(BOCHECHAS[t], bx + dist * ex + ox, by + r * 0.26 * ey + oy, blush);
@@ -3620,7 +3632,7 @@ function desenharArcoIris() {
 function desenharClaraoTerra() {
   if (flashTerra <= 0) return;
   const p = flashTerra / CFG.TERRA_CLARAO;
-  ctx.globalAlpha = Math.pow(p, 1.4) * 0.85;
+  ctx.globalAlpha = Math.pow(p, 1.4) * 0.85 * forcaFlash();
   ctx.fillStyle = COR.turboClarao;
   ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
@@ -3631,7 +3643,7 @@ function desenharClaraoTerra() {
 function desenharClaraoIma() {
   if (flashIma <= 0) return;
   const p = flashIma / CFG.MARTE_CLARAO;
-  ctx.globalAlpha = Math.pow(p, 1.4) * 0.7;
+  ctx.globalAlpha = Math.pow(p, 1.4) * 0.7 * forcaFlash();
   ctx.fillStyle = COR.imaClarao;
   ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
@@ -3649,7 +3661,7 @@ function desenharBrilhoRoxo() {
   const larg = Math.max(6, Math.round(VL * 0.2));
   for (let i = 0; i < larg; i++) {
     const t = 1 - i / larg;
-    const a = Math.pow(t, 1.8) * p * 0.85;
+    const a = Math.pow(t, 1.8) * p * 0.85 * forcaFlash();
     if (a <= 0.012) continue;
     ctx.globalAlpha = a;
     ctx.fillStyle = COR.jupiter[3];
@@ -3665,7 +3677,7 @@ function desenharBrilhoRoxo() {
 function desenharClaraoAzul() {
   if (flashAzul <= 0) return;
   const p = flashAzul / CFG.NETUNO_CLARAO;
-  ctx.globalAlpha = Math.pow(p, 1.4) * 0.55;
+  ctx.globalAlpha = Math.pow(p, 1.4) * 0.55 * forcaFlash();
   ctx.fillStyle = COR.netuno[0];
   ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
@@ -3678,7 +3690,7 @@ function desenharBrilhoSaturno() {
   const troca = quadro % 8 < 4;
   for (let i = 0; i < larg; i++) {
     const t = 1 - i / larg;
-    const a = Math.pow(t, 1.7) * p * 0.9;
+    const a = Math.pow(t, 1.7) * p * 0.9 * forcaFlash();
     if (a <= 0.012) continue;
     ctx.globalAlpha = a;
     ctx.fillStyle = troca ? COR.saturno[3] : COR.bloco[3];
@@ -3692,7 +3704,7 @@ function desenharBrilhoSaturno() {
 function desenharClaraoTiro() {
   if (flashTiro <= 0) return;
   const p = flashTiro / CFG.SATURNO_CLARAO;
-  ctx.globalAlpha = Math.pow(p, 1.4) * 0.7;
+  ctx.globalAlpha = Math.pow(p, 1.4) * 0.7 * forcaFlash();
   ctx.fillStyle = COR.bloco[0];
   ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
@@ -3701,7 +3713,7 @@ function desenharClaraoTiro() {
 function desenharClaraoEnjoo() {
   if (flashEnjoo > 0) {
     const p = flashEnjoo / 26;
-    ctx.globalAlpha = Math.pow(p, 1.4) * 0.8;
+    ctx.globalAlpha = Math.pow(p, 1.4) * 0.8 * forcaFlash();
     ctx.fillStyle = COR.enjooClarao;
     ctx.fillRect(0, 0, VL, VA);
     ctx.globalAlpha = 1;
@@ -3712,7 +3724,7 @@ function desenharClaraoEnjoo() {
   const larg = Math.max(4, Math.round(VL * 0.13));
   for (let i = 0; i < larg; i++) {
     const t = 1 - i / larg;
-    const a = Math.pow(t, 2.2) * 0.5 * q;
+    const a = Math.pow(t, 2.2) * 0.5 * q * forcaFlash();
     if (a <= 0.012) continue;
     ctx.globalAlpha = a;
     ctx.fillStyle = COR.cometa[1];
@@ -3722,13 +3734,18 @@ function desenharClaraoEnjoo() {
   ctx.globalAlpha = 1;
 }
 
+/* No fundo preto qualquer chapada clara na borda vira um estouro: o olho
+   está adaptado ao escuro e o mesmo alfa que era um brilho no branco vira
+   uma parede de luz. Todos os flashes de lateral passam por aqui. */
+function forcaFlash() { return CFG.FUNDO_PB ? 0.42 : 1; }
+
 function desenharBrilhoLateral() {
   if (flashLado <= 0) return;
   const p = flashLado / 34;
   const larg = Math.max(6, Math.round(VL * 0.19));
   for (let i = 0; i < larg; i++) {
     const q = 1 - i / larg;
-    const a = Math.pow(q, 1.9) * p * 0.85;
+    const a = Math.pow(q, 1.9) * p * 0.85 * forcaFlash();
     if (a <= 0.012) continue;
     ctx.globalAlpha = a;
     ctx.fillStyle = COR.coracao[1];
