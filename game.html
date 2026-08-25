@@ -169,6 +169,7 @@ const CFG = {
 
   /* controle */
   ZONA_MORTA: 4,
+  BOTAO_AFUNDA: 7,       // quadros que o botão afunda antes de valer
   /* squash & stretch */
   ELAST_MOLA: 0.16,      // rigidez: quanto maior, mais rápido o repique
   ELAST_ATRITO: 0.885,    // quanto a mola perde por quadro; perto de 1 balança mais
@@ -183,7 +184,8 @@ const CFG = {
   ESPIRAL_GIRO: 0.15,     // torção da imagem no redemoinho, em radianos
   ESPIRAL_PUXA: 0.055,    // e o quanto ela é sugada para o centro
   RAIO_ANALOG: 22,
-  ESCURO: false,         // versão escura: fundo preto e estrelas brancas
+  ESCURO: false,          // paleta escura inteira (dormente)
+  FUNDO_PB: false,        // só o cenário em preto e branco; o resto mantém a cor
   SEMENTE: 20260823
 };
 
@@ -347,6 +349,40 @@ const PALETAS = {
    execução — se voltar a ter, é preciso reatribuir COR e regerar as camadas de
    nuvem, que são a única coisa cozida com a paleta no carregamento. */
 const COR = CFG.ESCURO ? PALETAS.escuro : PALETAS.claro;
+
+/* ── fundo escuro ─────────────────────────────────────────────
+   Não é a paleta escura inteira: aqui só o CENÁRIO vira preto e branco — céu,
+   nebulosas, poeira e estrelas — e todo o resto do jogo mantém a cor. É outra
+   ideia da versão escura anterior: em vez de reinventar o jogo em néon, o
+   campo vira um fundo neutro e as cores passam a viver só nos personagens e
+   nos efeitos, que é onde a informação está.
+
+   Os painéis e as bordas de barra vão junto porque são chapadas claras: sobre
+   preto elas viravam manchas brancas maiores que qualquer personagem. */
+const FUNDO_PB = {
+  vazio:  "#06040d",
+  nebs: [["#0f0d16","#1b1826","#2f2a3d","#514a63","#867e9a","#d6d0e4"],
+         ["#0f0d16","#1b1826","#2f2a3d","#514a63","#867e9a","#d6d0e4"],
+         ["#0f0d16","#1b1826","#2f2a3d","#514a63","#867e9a","#d6d0e4"],
+         ["#0f0d16","#1b1826","#2f2a3d","#514a63","#867e9a","#d6d0e4"]],
+  poeira: ["#1a1626","#221d31","#2b2540"],
+  estrela: "#ffffff",
+  estrelaSuave: "#a79cba",
+  painel: "#161020",
+  borda:  "#2b2438",
+  hudFraco: "#8a7c9c"
+};
+/* guarda o que estava valendo, para conseguir voltar */
+const FUNDO_ORIGINAL = {};
+for (const k in FUNDO_PB) FUNDO_ORIGINAL[k] = COR[k];
+
+function aplicarFundo(pb) {
+  CFG.FUNDO_PB = pb;
+  const de = pb ? FUNDO_PB : FUNDO_ORIGINAL;
+  for (const k in FUNDO_PB) COR[k] = de[k];
+  coresPintadas = -1;                  // as nuvens são cozidas com a paleta
+  gerarCamadas();
+}
 
 /* ── fonte pixel 5x7 (a 8a linha guarda as descidas de g, j, p, q, y) ── */
 const FONTE_H = 8;
@@ -1026,6 +1062,36 @@ function larguraTexto(str, tam) {
 function textoCentro(str, y, cor, tam) {
   texto(str, Math.round((VL - larguraTexto(str, tam || 1)) / 2), y, cor, tam);
 }
+/* ANTECIPAÇÃO no botão: ao tocar, ele AFUNDA por uns quadros e só então a
+   ação acontece. O peso do movimento vem do recuo antes do avanço; botão que
+   dispara no mesmo quadro do toque não tem peso nenhum, só resposta.
+   `acao` é guardada e chamada quando o afundar termina. */
+let botaoAfundando = null;
+function apertar(nome, acao) {
+  botaoAfundando = { nome: nome, t: CFG.BOTAO_AFUNDA, total: CFG.BOTAO_AFUNDA, acao: acao };
+}
+function passoBotao() {
+  if (!botaoAfundando) return;
+  if (--botaoAfundando.t > 0) return;
+  const acao = botaoAfundando.acao;
+  botaoAfundando = null;
+  if (acao) acao();
+}
+/* o quanto encolher agora, para quem está desenhando o botão */
+function encolhimento(nome) {
+  if (!botaoAfundando || botaoAfundando.nome !== nome) return 0;
+  const p = botaoAfundando.t / botaoAfundando.total;
+  return Math.sin(p * Math.PI) * 0.14 + (1 - p) * 0.02;
+}
+/* devolve o retângulo já encolhido, mantendo o centro */
+function comprimir(r, nome) {
+  const e = encolhimento(nome);
+  if (e <= 0) return r;
+  const dl = Math.round(r.l * e), da = Math.round(r.a * e);
+  return { x: r.x + Math.round(dl / 2), y: r.y + Math.round(da / 2),
+           l: r.l - dl, a: r.a - da };
+}
+
 function caixa(r, corFundo, corBorda) {
   ctx.fillStyle = corFundo;
   ctx.fillRect(r.x, r.y, r.l, r.a);
@@ -1046,7 +1112,7 @@ function botaoJogar() {
    A caixa também tem lado ímpar, para o centro dela cair em cima de um pixel
    e não entre dois. */
 function desenharBotaoSair() {
-  const b = botaoSair();
+  const b = comprimir(botaoSair(), "sair");
   caixa(b, COR.painel, COR.hudFraco);
   const l = larguraTexto("X", 1);
   texto("X", b.x + Math.round((b.l - l) / 2),
@@ -1452,25 +1518,33 @@ tela.addEventListener("pointerdown", e => {
     for (let i = 0; i < CFG.RIVAIS_MAX; i++)
       if (dentro(gx, gy, botaoOponente(i), 5)) {
         SFX.clique();
-        CFG.RIVAIS = i + 1;
-        gerarCamadas();                // entra a cor de nebulosa do novo jogador
-        reiniciar();                   // e recoloca os bonecos já no menu
+        apertar("op" + i, () => {
+          CFG.RIVAIS = i + 1;
+          gerarCamadas();              // entra a cor de nebulosa do novo jogador
+          reiniciar();                 // e recoloca os bonecos já no menu
+        });
         return;
       }
     if (dentro(gx, gy, botaoSom(), 5)) {
       SOM.ligado = !SOM.ligado;
       if (SOM.ligado) SFX.clique();
+      apertar("som", null);
       return;
     }
-    if (dentro(gx, gy, botaoJogar(), 6)) { SFX.clique(); jogar(); }
+    if (dentro(gx, gy, botaoFundo(), 5)) {
+      SFX.clique();
+      apertar("fundo", () => aplicarFundo(!CFG.FUNDO_PB));
+      return;
+    }
+    if (dentro(gx, gy, botaoJogar(), 6)) { SFX.clique(); apertar("jogar", jogar); }
     return;
   }
   if (cena === "fim") {
-    if (dentro(gx, gy, botaoJogar(), 6)) { SFX.clique(); jogar(); }
-    else if (dentro(gx, gy, botaoSair(), 8)) { SFX.clique(); sair(); }
+    if (dentro(gx, gy, botaoJogar(), 6)) { SFX.clique(); apertar("jogar", jogar); }
+    else if (dentro(gx, gy, botaoSair(), 8)) { SFX.clique(); apertar("sair", sair); }
     return;
   }
-  if (dentro(gx, gy, botaoSair(), 8)) { SFX.clique(); sair(); return; }
+  if (dentro(gx, gy, botaoSair(), 8)) { SFX.clique(); apertar("sair", sair); return; }
 
   if (toque.id !== null) return;
   tela.setPointerCapture(e.pointerId);
@@ -1803,7 +1877,7 @@ function passoCadente(L) {
       faiscar(cadente.x, cadente.y, 30, 3, 8);
       for (let k = 0; k < 26; k++) {
         const a = Math.random() * Math.PI * 2, v = (0.7 + Math.random()) / zoom;
-        faiscas.push({ x: cadente.x, y: cadente.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+        faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: cadente.x, y: cadente.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
                        vida: 18 + Math.floor(Math.random() * 14), arrasto: 0.97, tipo: "raio",
                        cor: COR.cadente[Math.floor(Math.random() * COR.cadente.length)] });
       }
@@ -1882,7 +1956,7 @@ function escudou(p, x, y) {
   aneis.push({ x: x, y: y, r: 2, vida: 16, total: 16, rival: p !== buraco, pal: p !== buraco ? paletaDe(p).disco : null });
   for (let k = 0; k < 14; k++) {
     const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random() * 1.1) / zoom;
-    faiscas.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
                    vida: 12 + Math.floor(Math.random() * 10), arrasto: 0.94, tipo: "raio",
                    cor: COR.arcoiris[Math.floor(Math.random() * COR.arcoiris.length)] });
   }
@@ -1921,7 +1995,7 @@ function bafo(x, y, quantas, forca) {
   for (let k = 0; k < quantas; k++) {
     const a = Math.random() * Math.PI * 2;
     const v = (0.3 + Math.random() * 1.2) * forca / zoom;
-    faiscas.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
                    vida: 20 + Math.floor(Math.random() * 20), arrasto: 0.95,
                    tipo: "enjoo", cor: COR.cometa[1 + Math.floor(Math.random() * 3)] });
   }
@@ -1953,7 +2027,7 @@ function explodirEstrelas(x, y, quantas) {
   for (let k = 0; k < quantas; k++) {
     const a = Math.random() * Math.PI * 2;
     const v = (0.7 + Math.random() * 2.1) / zoom;
-    faiscas.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
                    vida: 22 + Math.floor(Math.random() * 16), arrasto: 0.945,
                    tipo: "estrela",
                    cor: COR.coroa[Math.floor(Math.random() * COR.coroa.length)] });
@@ -2265,6 +2339,17 @@ function passoParticulas() {
   for (let i = faiscas.length - 1; i >= 0; i--) {
     const f = faiscas[i];
     const ar = f.arrasto || 0.9;
+    /* ARCOS: cada faísca gira o próprio vetor de velocidade um pouquinho por
+       quadro, então o caminho sai curvo em vez de reto. Reta com atrito é o
+       que um cálculo faz; o olho espera arco, porque é assim que qualquer
+       coisa lançada anda no mundo. O sentido é sorteado no nascimento, então
+       um estouro abre em leque para os dois lados. */
+    if (f.curva) {
+      const co = Math.cos(f.curva), si = Math.sin(f.curva);
+      const vx = f.vx;
+      f.vx = vx * co - f.vy * si;
+      f.vy = vx * si + f.vy * co;
+    }
     f.x += f.vx; f.y += f.vy; f.vx *= ar; f.vy *= ar; f.vida--;
     if (f.vida <= 0) faiscas.splice(i, 1);
   }
@@ -2333,7 +2418,7 @@ function passoParticulas() {
 function raiarTurbo() {
   const a = Math.random() * Math.PI * 2;
   const v = (0.8 + Math.random() * 1.1) / zoom;
-  faiscas.push({ x: buraco.x, y: buraco.y,
+  faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: buraco.x, y: buraco.y,
                  vx: Math.cos(a) * v, vy: Math.sin(a) * v,
                  vida: 16 + Math.floor(Math.random() * 14), arrasto: 0.975, tipo: "raio",
                  cor: COR.turboPart[Math.floor(Math.random() * COR.turboPart.length)] });
@@ -2342,7 +2427,7 @@ function raiarTurbo() {
 function faiscar(x, y, quantas, dei, dfi) {
   for (let k = 0; k < quantas; k++) {
     const a = Math.random() * Math.PI * 2, s = (0.4 + Math.random() * 1.1) / zoom;
-    faiscas.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
                    vida: 10 + Math.floor(Math.random() * 12),
                    cor: COR.disco[dei + Math.floor(Math.random() * (dfi - dei))] });
   }
@@ -2530,7 +2615,7 @@ function engolirSaturno(dono) {
   flashTiro = CFG.SATURNO_CLARAO;
   for (let k = 0; k < 20; k++) {
     const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random()) / zoom;
-    faiscas.push({ x: buraco.x, y: buraco.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: buraco.x, y: buraco.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
                    vida: 16 + Math.floor(Math.random() * 12), arrasto: 0.96, tipo: "enjoo",
                    cor: COR.bloco[Math.floor(Math.random() * COR.bloco.length)] });
   }
@@ -2584,7 +2669,7 @@ function passoBlocos(L) {
       faiscar(g.x, g.y, 10, 2, 6);
       for (let k = 0; k < 10; k++) {
         const a = Math.random() * Math.PI * 2, s2 = (0.5 + Math.random()) / zoom;
-        faiscas.push({ x: g.x, y: g.y, vx: Math.cos(a) * s2, vy: Math.sin(a) * s2,
+        faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: g.x, y: g.y, vx: Math.cos(a) * s2, vy: Math.sin(a) * s2,
                        vida: 12 + Math.floor(Math.random() * 10), arrasto: 0.94,
                        tipo: "enjoo", cor: COR.bloco[Math.floor(Math.random() * 3)] });
       }
@@ -2638,7 +2723,7 @@ function arrancarEstrela(de, vitima) {
   });
   for (let k = 0; k < 8; k++) {
     const b = Math.random() * Math.PI * 2, v = (0.5 + Math.random()) / zoom;
-    faiscas.push({ x: vitima.x, y: vitima.y, vx: Math.cos(b) * v, vy: Math.sin(b) * v,
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: vitima.x, y: vitima.y, vx: Math.cos(b) * v, vy: Math.sin(b) * v,
                    vida: 12 + Math.floor(Math.random() * 8), arrasto: 0.95, tipo: "raio",
                    cor: COR.jupiter[2 + Math.floor(Math.random() * 3)] });
   }
@@ -2689,7 +2774,7 @@ function engolirNetuno(dono) {
   arco = Math.max(arco, 30);
   for (let k = 0; k < 26; k++) {
     const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random()) / zoom;
-    faiscas.push({ x: buraco.x, y: buraco.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: buraco.x, y: buraco.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
                    vida: 16 + Math.floor(Math.random() * 12), arrasto: 0.96, tipo: "raio",
                    cor: COR.arcoiris[Math.floor(Math.random() * COR.arcoiris.length)] });
   }
@@ -2710,7 +2795,7 @@ function engolirJupiter(dono) {
   flashRoxo = CFG.JUPITER_CLARAO;
   for (let k = 0; k < 26; k++) {
     const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random()) / zoom;
-    faiscas.push({ x: buraco.x, y: buraco.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+    faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: buraco.x, y: buraco.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
                    vida: 16 + Math.floor(Math.random() * 12), arrasto: 0.96, tipo: "raio",
                    cor: COR.jupiter[2 + Math.floor(Math.random() * 3)] });
   }
@@ -2725,7 +2810,7 @@ function fioRoxo(de, vitima) {
   const dx = de.x - vitima.x, dy = de.y - vitima.y;
   const m = Math.hypot(dx, dy) || 1;
   const v = (1.2 + Math.random()) / zoom;
-  faiscas.push({ x: x + (Math.random() - 0.5) * 6 / zoom,
+  faiscas.push({ curva: (Math.random() - 0.5) * 0.09, x: x + (Math.random() - 0.5) * 6 / zoom,
                  y: y + (Math.random() - 0.5) * 6 / zoom,
                  vx: dx / m * v, vy: dy / m * v,
                  vida: 10 + Math.floor(Math.random() * 8), arrasto: 0.98, tipo: "raio",
@@ -2739,7 +2824,9 @@ function faiscarIma() {
   const a = Math.random() * Math.PI * 2;
   const d = raioMundo() + Math.random() * (alc - raioMundo());
   const v = (0.5 + Math.random() * 0.9) / zoom;
-  faiscas.push({ x: buraco.x + Math.cos(a) * d, y: buraco.y + Math.sin(a) * d,
+  // a poeira do ímã tem alvo: curva demais e ela erra o buraco
+  faiscas.push({ curva: (Math.random() - 0.5) * 0.02,
+                 x: buraco.x + Math.cos(a) * d, y: buraco.y + Math.sin(a) * d,
                  vx: -Math.cos(a) * v, vy: -Math.sin(a) * v,
                  vida: 14 + Math.floor(Math.random() * 10), arrasto: 0.99, tipo: "raio",
                  cor: COR.imaPart[Math.floor(Math.random() * COR.imaPart.length)] });
@@ -3846,7 +3933,7 @@ function desenharFim() {
   const gy = y0 + 12, ga = Math.max(40, botaoJogar().y - gy - 14);
   desenharGrafico(gx, gy, gl, ga);
 
-  const b = botaoJogar();
+  const b = comprimir(botaoJogar(), "jogar");
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
   caixa(b, COR.painel, pulso > 0.5 ? COR.disco[4] : COR.disco[3]);
   texto("de novo", b.x + Math.round((b.l - larguraTexto("de novo", 2)) / 2),
@@ -3869,7 +3956,25 @@ function botaoOponente(i) {
 /* liga/desliga o som: só o ícone da caixinha, sem rótulo nem chave */
 function botaoSom() {
   const b0 = botaoOponente(0);
-  return { x: Math.round(VL / 2) - 8, y: b0.y + b0.a + 10, l: 17, a: 11 };
+  return { x: Math.round(VL / 2) - 26, y: b0.y + b0.a + 10, l: 17, a: 11 };
+}
+function botaoFundo() {
+  const b0 = botaoOponente(0);
+  return { x: Math.round(VL / 2) + 9, y: b0.y + b0.a + 10, l: 13, a: 11 };
+}
+
+/* Ícone do fundo: um círculo com metade cheia. É o símbolo mais direto de
+   "troca de contraste", e não precisa de legenda. */
+function desenharIconeFundo(x, y, pb) {
+  const c = pb ? COR.disco[5] : COR.hudFraco;
+  const cx = x + 6, cy = y + 5, r = 5;
+  anel(cx, cy, r, 1.2, c);
+  ctx.fillStyle = c;
+  for (let dy = -r + 1; dy <= r - 1; dy++) {
+    const w = Math.floor(Math.sqrt(Math.max(0, (r - 1) * (r - 1) - dy * dy)));
+    if (w <= 0) continue;
+    ctx.fillRect(cx, cy + dy, w + 1, 1);          // só a metade da direita
+  }
 }
 
 /* Caixinha de som como SPRITE, do jeito que o resto do jogo desenha coisa
@@ -3930,7 +4035,7 @@ function desenharMenu() {
   texto(rot, Math.round((VL - larguraTexto(rot, 1)) / 2),
         botaoOponente(0).y - 9, COR.hudFraco, 1);
   for (let i = 0; i < CFG.RIVAIS_MAX; i++) {
-    const bo = botaoOponente(i);
+    const bo = comprimir(botaoOponente(i), "op" + i);
     const escolhido = CFG.RIVAIS === i + 1;
     // cada opção pinta na cor do rival que ela acrescenta
     const cor = COR.rivais[i].disco[6];
@@ -3941,11 +4046,13 @@ function desenharMenu() {
           escolhido ? cor : COR.hudFraco, 1);
   }
 
-  /* som */
-  const bs = botaoSom();
+  /* som e fundo, lado a lado */
+  const bs = comprimir(botaoSom(), "som");
   desenharIconeSom(bs.x, bs.y, SOM.ligado);
+  const bf = comprimir(botaoFundo(), "fundo");
+  desenharIconeFundo(bf.x, bf.y, CFG.FUNDO_PB);
 
-  const b = botaoJogar();
+  const b = comprimir(botaoJogar(), "jogar");
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
   caixa(b, COR.painel, pulso > 0.5 ? COR.disco[5] : COR.disco[4]);
   texto("JOGAR", b.x + Math.round((b.l - larguraTexto("JOGAR", 2)) / 2),
@@ -4165,7 +4272,7 @@ function laco(agora) {
   acumulado += Math.min(100, agora - ultimo);
   ultimo = agora;
   let n = 0;
-  while (acumulado >= DT && n++ < 5) { passo(); acumulado -= DT; }
+  while (acumulado >= DT && n++ < 5) { passo(); passoBotao(); acumulado -= DT; }
   if (acumulado > DT) acumulado = 0;
   desenhar();
   requestAnimationFrame(laco);
