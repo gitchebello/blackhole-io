@@ -101,7 +101,6 @@ const CFG = {
   JUPITER_DRENO: 600,    // duração do poder (600 = 10s)
   JUPITER_RITMO: 20,     // 3 estrelas por segundo
   JUPITER_FOLGA: 6,      // basta o rival estar na tela; a folga é a margem
-  JUPITER_ONDA: 1.6,     // amplitude da ondulação durante o efeito
   JUPITER_CLARAO: 26,
 
   /* Netuno — o azul profundo: escudo total por um tempo */
@@ -1219,13 +1218,19 @@ reiniciar();
 
 /* ── controle ────────────────────────────────────────────────── */
 const toque = { ativo: false, ax: 0, ay: 0, x: 0, y: 0, id: null,
-                ang: null, volta: 0, sentido: 0 };
+                ang: null, volta: 0, sentido: 0, acum: 0, parado: 0, girando: false };
 let espiral = 0;          // 0 a 1: o quanto o gesto de espiral está valendo
 const teclas = Object.create(null);
 
-function jogar() { reiniciar(); cena = "jogo"; }
-function sair()  { toque.ativo = false; toque.id = null; toque.ang = null;
-                   toque.volta = 0; espiral = 0; cena = "menu"; reiniciar(); }
+function zerarGesto() {
+  toque.ang = null; toque.acum = 0; toque.parado = 0;
+  toque.volta = 0; toque.girando = false; espiral = 0;
+}
+/* o gesto é zerado aqui e não em reiniciar(): reiniciar roda na abertura,
+   antes de `espiral` e `toque` existirem, e tocar neles ali dá erro */
+function jogar() { reiniciar(); zerarGesto(); cena = "jogo"; }
+function sair()  { toque.ativo = false; toque.id = null;
+                   cena = "menu"; reiniciar(); zerarGesto(); }
 
 tela.addEventListener("pointerdown", e => {
   e.preventDefault();
@@ -1247,6 +1252,9 @@ tela.addEventListener("pointerdown", e => {
   toque.ativo = true; toque.id = e.pointerId;
   toque.ax = e.clientX; toque.ay = e.clientY;
   toque.x = e.clientX;  toque.y = e.clientY;
+  // dedo novo, gesto novo: sem isso um toque herda o semicírculo do anterior
+  toque.ang = null; toque.acum = 0; toque.volta = 0;
+  toque.parado = 0; toque.girando = false;
 });
 tela.addEventListener("pointermove", e => {
   if (!toque.ativo || e.pointerId !== toque.id) return;
@@ -1273,28 +1281,58 @@ window.addEventListener("keydown", e => {
 window.addEventListener("keyup", e => { teclas[e.key] = false; });
 
 /* ── lógica ──────────────────────────────────────────────────── */
-/* Mede o quanto o dedo está girando em torno do ponto onde encostou.
-   Acumula o |dθ| com decaimento: o valor de regime é proporcional à
-   VELOCIDADE do giro, não ao total girado — assim parar de rodar desliga o
-   modo em meio segundo, em vez de deixar um saldo pendurado. */
+/* O modo sucção só liga depois de um SEMICÍRCULO completo no mesmo sentido.
+   Antes bastava a velocidade de giro, e uma simples troca de direção — que é
+   um arco curto — já acendia o modo: o boneco parava de acelerar bem na hora
+   em que o jogador queria virar. Agora `acum` soma o ângulo com sinal e zera
+   a cada inversão de sentido; só ao passar de meia volta o modo destrava.
+   A partir daí a intensidade continua vindo da VELOCIDADE do giro. */
 function lerEspiral() {
-  if (!toque.ativo) { toque.ang = null; toque.volta = 0; espiral = 0; return; }
+  if (!toque.ativo) {
+    toque.ang = null; toque.volta = 0; toque.acum = 0;
+    toque.parado = 0; toque.girando = false;
+    espiral = 0;
+    return;
+  }
   const dx = toque.x - toque.ax, dy = toque.y - toque.ay;
   if (Math.hypot(dx, dy) < CFG.ZONA_MORTA * 2) {   // perto demais, o ângulo pula
-    toque.ang = null; toque.volta *= 0.9;
+    toque.ang = null; toque.volta *= 0.9; toque.acum *= 0.9;
   } else {
     const a = Math.atan2(dy, dx);
     if (toque.ang !== null) {
       let d = a - toque.ang;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
+      // inverteu o sentido? o semicírculo recomeça do zero
+      if (d * toque.acum < 0) toque.acum = 0;
+      // O acumulado zera quando o dedo PARA de rodar, não por decaimento.
+      // Com decaimento ele saturava em d/0.03 e só uma volta bem rápida
+      // alcançava meia volta — giro moderado nunca ligava. Zerando na pausa,
+      // "virar e segurar a direção" (que é o que atrapalhava a fluidez) some,
+      // e qualquer giro contínuo, mesmo calmo, conta.
+      if (Math.abs(d) < 0.015) {
+        if (++toque.parado > 8) { toque.acum = 0; toque.parado = 0; }
+      } else {
+        toque.parado = 0;
+        toque.acum += d;
+      }
       toque.volta = toque.volta * 0.94 + Math.abs(d);
+      // e só destrava se, no instante da meia volta, o dedo ainda estiver
+      // rodando rápido: meia volta lenta é manobra, não espiral
+      if (Math.abs(toque.acum) >= Math.PI && toque.volta >= CFG.ESPIRAL_MIN)
+        toque.girando = true;
       toque.sentido = toque.sentido * 0.9 + Math.sign(d) * 0.1;
     }
     toque.ang = a;
   }
-  espiral = limitar((toque.volta - CFG.ESPIRAL_MIN) /
-                    (CFG.ESPIRAL_MAX - CFG.ESPIRAL_MIN), 0, 1);
+  // parou de rodar: destrava e o modo cai sozinho
+  if (toque.girando && toque.volta < CFG.ESPIRAL_MIN * 0.55) toque.girando = false;
+  const alvo = toque.girando
+    ? limitar((toque.volta - CFG.ESPIRAL_MIN) /
+              (CFG.ESPIRAL_MAX - CFG.ESPIRAL_MIN), 0, 1)
+    : 0;
+  espiral += (alvo - espiral) * 0.18;             // entra e sai macio
+  if (espiral < 0.01) espiral = 0;
 }
 
 function velMaxTela() {
@@ -1384,7 +1422,12 @@ function trombada(ux, uy) {
   const emp = CFG.COLISAO_EMPURRAO / zoom;
   buraco.vx = -ux * emp; buraco.vy = -uy * emp;
   rival.vx  =  ux * emp; rival.vy  =  uy * emp;
-  buraco.atordoado = rival.atordoado = CFG.COLISAO_ATORDOA;
+  // quem está com escudo é empurrado, mas não fica zonzo nem perde estrela:
+  // "invencível" tem que valer também para o avanço do outro
+  buraco.atordoado = buraco.imune > 0 ? 0 : CFG.COLISAO_ATORDOA;
+  rival.atordoado = rival.imune > 0 ? 0 : CFG.COLISAO_ATORDOA;
+  if (buraco.imune > 0) escudou(buraco, buraco.x, buraco.y);
+  if (rival.imune > 0) escudou(rival, rival.x, rival.y);
   buraco.pulso = 1; rival.pulso = 1;
   buraco.surpresa = rival.surpresa = CFG.COLISAO_SURPRESA;
   rival.alvo = null;                     // ele reavalia depois de levar o tranco
@@ -1398,6 +1441,7 @@ function trombada(ux, uy) {
   aneis.push({ x: mx, y: my, r: 4, vida: 22, total: 22, rival: false });
 
   const perdedor = buraco.comidas <= rival.comidas ? buraco : rival;
+  if (perdedor.imune > 0) return;               // escudo segura a conta também
   const quantas = Math.min(CFG.COLISAO_ESTRELAS, perdedor.comidas);
   if (quantas <= 0) return;
   perderEstrelas(perdedor, quantas);
@@ -1512,7 +1556,8 @@ function passoCometa(L) {
   for (const p of [buraco, rival]) {
     const rp = p === buraco ? raioMundo() : raioMundoNivel(p.nivel);
     if (Math.hypot(cometa.x - p.x, cometa.y - p.y) < rp + rc) {
-      adoecer(p);
+      // com escudo, o cometa se despedaça sem deixar enjoo
+      if (!escudou(p, cometa.x, cometa.y)) adoecer(p);
       cometa = null;
       return;
     }
@@ -1522,6 +1567,25 @@ function passoCometa(L) {
   if (cometa.vida <= 0 ||
       cometa.x < L.x0 - fora || cometa.x > L.x1 + fora ||
       cometa.y < L.y0 - fora || cometa.y > L.y1 + fora) cometa = null;
+}
+
+/* Escudo de Netuno batendo: estilhaça o que veio e não deixa passar nada.
+   Devolve true quando defendeu, para quem chamou saber que não deve seguir. */
+function escudou(p, x, y) {
+  if (p.imune <= 0) return false;
+  p.pulso = Math.max(p.pulso, 0.7);
+  if (p === buraco) {
+    flashAzul = Math.max(flashAzul, 16);
+    tremor = Math.max(tremor, 6);
+  }
+  aneis.push({ x: x, y: y, r: 2, vida: 16, total: 16, rival: p === rival });
+  for (let k = 0; k < 14; k++) {
+    const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random() * 1.1) / zoom;
+    faiscas.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                   vida: 12 + Math.floor(Math.random() * 10), arrasto: 0.94, tipo: "raio",
+                   cor: COR.arcoiris[Math.floor(Math.random() * COR.arcoiris.length)] });
+  }
+  return true;
 }
 
 function adoecer(p) {
@@ -1774,7 +1838,8 @@ function passo() {
       drenando = true;
       if (--p.ritmoDreno <= 0) {
         p.ritmoDreno = CFG.JUPITER_RITMO;
-        if (outro.comidas > 0 && outro.imune <= 0) arrancarEstrela(p, outro);
+        if (outro.imune > 0) escudou(outro, outro.x, outro.y);
+        else if (outro.comidas > 0) arrancarEstrela(p, outro);
       }
       if (quadro % 3 === 0) fioRoxo(p, outro);
     } else {
@@ -2050,6 +2115,7 @@ function passoBlocos(L) {
 
     const rv = vitima === buraco ? raioMundo() : raioMundoNivel(vitima.nivel);
     if (Math.hypot(g.x - vitima.x, g.y - vitima.y) < rv + rr) {
+      if (escudou(vitima, g.x, g.y)) { blocos.splice(i, 1); continue; }
       const quantas = Math.min(CFG.SATURNO_DANO, vitima.comidas);
       if (quantas > 0) perderEstrelas(vitima, quantas);
       vitima.pulso = 1; vitima.boca = 14;
@@ -3196,40 +3262,23 @@ function vinheta() {
 }
 
 
-/* Filtro do campo gravitacional de Júpiter: a imagem ondula em faixas
-   horizontais e ganha saturação. A ondulação é feita por bandas de 3 px
-   deslocadas na horizontal — uma cópia por banda, tudo na GPU, sem
-   getImageData. A saturação usa o modo de mistura "saturation" do canvas,
-   que é barato porque não sai do compositor.
-   Roda antes do HUD de propósito: número ondulando ninguém lê. */
-const bufJ = document.createElement("canvas");
-
+/* Campo gravitacional de Júpiter: só cor, sem deformar a imagem.
+   A ondulação em bandas foi removida — ela embaralhava o personagem justo
+   quando é mais importante enxergar onde ele está. A saturação usa o modo de
+   mistura "saturation" do canvas, que é barato porque não sai do compositor.
+   Roda antes do HUD de propósito. */
 function campoRoxo() {
   const d = Math.max(buraco.dreno, rival.dreno);
   if (d <= 0) return;
   // sobe rápido e desce no fim, para não cortar seco quando o poder acaba
   const f = Math.min(1, (CFG.JUPITER_DRENO - d) / 12) * Math.min(1, d / 40);
   if (f <= 0.02) return;
-  if (bufJ.width !== VL || bufJ.height !== VA) { bufJ.width = VL; bufJ.height = VA; }
-  const jx = bufJ.getContext("2d");
-  jx.globalCompositeOperation = "source-over";
-  jx.clearRect(0, 0, VL, VA);
-  jx.drawImage(tela, 0, 0);
-
-  const H = 3, amp = CFG.JUPITER_ONDA * f * (drenando ? 1.6 : 1);
-  for (let y = 0; y < VA; y += H) {
-    // duas senoides de períodos diferentes: uma só vira listra regular
-    const d = Math.sin(y * 0.14 + quadro * 0.1) * amp +
-              Math.sin(y * 0.047 - quadro * 0.055) * amp * 0.6;
-    ctx.drawImage(bufJ, 0, y, VL, H, Math.round(d), y, VL, H);
-  }
-  // saturação: o roxo puxa a cena inteira para o lado saturado
   ctx.globalCompositeOperation = "saturation";
   ctx.globalAlpha = 0.5 * f;
   ctx.fillStyle = COR.roxo;
   ctx.fillRect(0, 0, VL, VA);
   ctx.globalCompositeOperation = "source-over";
-  ctx.globalAlpha = 0.07 * f;
+  ctx.globalAlpha = 0.08 * f;
   ctx.fillStyle = COR.jupiter[3];
   ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
