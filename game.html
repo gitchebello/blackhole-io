@@ -1619,6 +1619,7 @@ function passoCadente(L) {
       }
       p.pulso = 1; p.boca = 22;
       if (p === buraco) { tremor = 16; aberr = CFG.ABERRACAO; soltarCoracoes(p.x, p.y, 18, 1.8, 1); }
+      if (p === buraco) anunciar("+" + CFG.CADENTE_PREMIO + "!", COR.cadente[2]);
       ganharEstrelas(p, CFG.CADENTE_PREMIO);
       cadente = null;
       return;
@@ -3112,12 +3113,12 @@ function seta(x, y, ang, tam, larg, cor) {
   }
 }
 
-/* Marca de borda: aponta para algo que está fora da tela. Ela respira na
-   direção do alvo (avança e recua) e leva um halo, senão some no fundo claro.
-   `estilo` muda a silhueta para dar de ler qual é qual sem depender da cor:
-   0 = seta cheia (rival), 1 = seta com miolo aceso (prêmios), 2 = seta dupla,
-   de perigo vindo rápido (cometa). */
-function marcaNaBorda(mx0, my0, cores, estilo) {
+/* Marca de borda: aponta para um jogador que está fora da tela. Ela respira
+   na direção dele (avança e recua) e leva um halo, senão some no fundo claro.
+   As silhuetas alternativas (seta dupla, miolo aceso) foram embora junto com
+   as marcas de cometa e cadente — só jogador tem seta agora, e a cor de cada
+   um já basta para saber quem é. */
+function marcaNaBorda(mx0, my0, cores) {
   const cx = VL / 2, cy = VA / 2;
   const dx = mx0 - cx, dy = my0 - cy;
   const ang = Math.atan2(dy, dx);
@@ -3135,24 +3136,15 @@ function marcaNaBorda(mx0, my0, cores, estilo) {
   const tam = 8 + pulso * 2.6;
   const larg = 4.2;
 
-  // halo em três camadas, cada uma mais fraca e mais larga
-  for (let k = 3; k >= 1; k--) {
+  for (let k = 3; k >= 1; k--) {                 // halo em três camadas
     ctx.globalAlpha = (0.08 + pulso * 0.08) * k / 3;
     disco(bx, by, tam * 0.75 + k * 2.6, cores[0]);
   }
   ctx.globalAlpha = 1;
 
   const rx = bx - ca * tam * 0.55, ry = by - sa * tam * 0.55;
-  if (estilo === 2) {                            // a segunda seta vem primeiro, atrás
-    const qx = rx - ca * (tam * 0.5 + 3), qy = ry - sa * (tam * 0.5 + 3);
-    seta(qx - ca, qy - sa, ang, tam * 0.55 + 2.4, larg * 0.65 + 1.3, COR.vazio);
-    seta(qx, qy, ang, tam * 0.55, larg * 0.65, cores[2]);
-  }
   seta(rx - ca, ry - sa, ang, tam + 2.4, larg + 1.3, COR.vazio);   // contorno
   seta(rx, ry, ang, tam, larg, cores[1]);
-  // miolo aceso: um ponto claro no meio do corpo, não uma segunda seta
-  // (uma seta dentro da outra vira serrilhado nesse tamanho)
-  if (estilo === 1) disco(rx + ca * tam * 0.32, ry + sa * tam * 0.32, 1.6, cores[2]);
 }
 
 /* cada rival fora de vista ganha sua marca na borda, na cor dele */
@@ -3162,27 +3154,10 @@ function desenharMarcaRival() {
     const rr = raioMundoNivel(r.nivel) * zoom;
     if (rx > -rr && rx < VL + rr && ry > -rr && ry < VA + rr) continue;
     const p = paletaDe(r);
-    marcaNaBorda(rx, ry, [p.disco[4], p.disco[6], p.disco[2]], 0);
+    marcaNaBorda(rx, ry, [p.disco[4], p.disco[6]]);
   }
 }
 
-function desenharMarcaCadente() {
-  if (!cadente) return;
-  const x = paraTelaX(cadente.x), y = paraTelaY(cadente.y);
-  if (x > -8 && x < VL + 8 && y > -8 && y < VA + 8) return;
-  marcaNaBorda(x, y, [COR.cadente[1], COR.cadente[2], COR.cadente[0]], 1);
-}
-
-
-/* O cometa é perigo, então usa a seta dupla: mesmo em azul, a silhueta não
-   deixa confundir com a marca do rival. */
-function desenharMarcaCometa() {
-  if (!cometa) return;
-  const x = paraTelaX(cometa.x), y = paraTelaY(cometa.y);
-  const r = CFG.COMETA_RAIO;
-  if (x > -r && x < VL + r && y > -r && y < VA + r) return;
-  marcaNaBorda(x, y, [COR.cometa[2], COR.cometa[4], COR.cometa[0]], 2);
-}
 
 /* Aviso do efeito no meio da tela. Entra estufando, sobe devagar e some.
    O brilho é o próprio texto repetido em volta com alfa baixo — o contorno
@@ -3199,7 +3174,7 @@ function desenharAnuncio() {
   const tam = p < 0.14 ? 1 : 2;
   const l = larguraTexto(anuncio.txt, tam);
   const x = Math.round((VL - l) / 2);
-  const y = Math.round(VA * 0.30 - p * 14);          // sobe enquanto some
+  const y = Math.round(VA * 0.33 - p * 14);          // sobe enquanto some
   const a = p > 0.7 ? (1 - p) / 0.3 : 1;             // só apaga no fim
 
   ctx.globalAlpha = a * (0.16 + 0.12 * Math.sin(quadro * 0.3));
@@ -3215,9 +3190,9 @@ function desenharAnuncio() {
 }
 
 function desenharHUD() {
+  // Seta é só para jogador. Com quatro em campo, mais cometa e cadente, a
+  // borda virava um festival de setas e ninguém achava o que importava.
   desenharMarcaRival();
-  desenharMarcaCadente();
-  desenharMarcaCometa();
   /* Placar simétrico no topo: você à esquerda, o rival à direita, os dois na
      MESMA altura, e o botão de sair no meio. Antes o X ficava no canto e
      empurrava o bloco do rival para baixo — as duas barras nunca casavam. */
@@ -3244,7 +3219,9 @@ function desenharHUD() {
     yr += 16;
   }
 
-  if (flash > 0) textoCentro("CRESCEU!", Math.round(VA * 0.3), COR.coracao[1], 2);
+  // sobe um pouco: pegar a cadente dá 10 estrelas e quase sempre sobe de
+  // nível junto, então os dois avisos apareciam um por cima do outro
+  if (flash > 0) textoCentro("CRESCEU!", Math.round(VA * 0.21), COR.coracao[1], 2);
   desenharAnuncio();
 
   const b = botaoSair();
