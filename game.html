@@ -3251,9 +3251,18 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
   const e = p.elast || 0;
   const rx = r * (1 + e), ry = r * (1 - e * 0.82);
 
-  ctx.globalAlpha = 0.4;                        // halo macio
-  oval(bx, by, rx + 5, ry + 5, halo);
-  ctx.globalAlpha = 1;
+  /* No branco o halo é uma oval chapada a 40% e funciona: ela clareia um
+     pouco o que já é claro. No preto a mesma oval vira um aro marrom de borda
+     dura em volta do personagem — chapada de cor sobre preto não lê como
+     brilho, lê como sujeira. Ali ele vira uma queda radial, que apaga de
+     verdade e deixa o preto voltar. */
+  if (CFG.FUNDO_PB) {
+    brilho(bx, by, Math.max(rx, ry), Math.max(rx, ry) + 7, halo, 0.22, 2.6);
+  } else {
+    ctx.globalAlpha = 0.4;                      // halo macio
+    oval(bx, by, rx + 5, ry + 5, halo);
+    ctx.globalAlpha = 1;
+  }
 
   /* Quem está com um poder de ataque ganha um anel pulsando fora do disco.
      Com quatro personagens, cinco planetas, cometa e cadente na tela, não dava
@@ -3361,17 +3370,16 @@ function desenharPersonagem(p, raio, paleta, halo, contorno, blush, comTurbo) {
         if (inten < 0.3) continue;
         // no arco-íris a cor vem do ÂNGULO, não da intensidade: é o que faz as
         // faixas girarem junto com o anel em vez de ficarem paradas
-        /* A escada de cor vai do claro (índice 0) ao escuro (N-1), e o disco
-         escolhe pelo brilho: no fundo BRANCO, mais intenso = mais escuro, que
-         é o que se destaca. No fundo PRETO isso se inverte — o trecho mais
-         forte do anel virava o mais apagado. Aqui a escada é lida de trás
-         para frente, e a frente do disco volta a ser a parte que brilha. */
-      const idx = Math.min(N - 1, Math.floor(inten * N));
+        /* A escada é lida do mesmo jeito nos dois fundos. Tentei invertê-la no
+         escuro "para a frente do disco brilhar" e o resultado foi um aro
+         claro e chapado, com cara de blur, que tapava o preto. O anel do jeito
+         original deixa o fundo aparecer através dele, e é isso que faz o
+         personagem parecer um buraco e não uma bola com aura. */
       const cor = iris
           ? COR.arcoiris[Math.floor(((a - giro * 1.6) / (Math.PI * 2) * COR.arcoiris.length
                                      % COR.arcoiris.length + COR.arcoiris.length))
                          % COR.arcoiris.length]
-          : paleta[CFG.FUNDO_PB ? Math.max(0, N - 1 - idx) : idx];
+          : paleta[Math.min(N - 1, Math.floor(inten * N))];
         // o anel acompanha o corpo: se ele achata, o anel achata junto,
         // senão o disco descola e o personagem parece dentro de um aro rígido
         px(bx + Math.cos(a) * rr * (rx / r), by + Math.sin(a) * rr * (ry / r), cor);
