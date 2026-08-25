@@ -690,28 +690,6 @@ function camadaAtual() {
   return melhor;
 }
 
-/* ── sprite da Terra: 8 quadros de rotação, desenhados pixel a pixel ──
-   A silhueta é montada linha a linha com a MESMA regra do disco() do jogo
-   (largura = round(sqrt(R²-dy²))). Desenhar por distância euclidiana dava um
-   contorno diferente do resto e a bolinha parecia recortada em quadrado. */
-const TERRA_D = CFG.TERRA_RAIO * 2 + 1;
-const TERRA_QUADROS = 8;
-const terraSprite = document.createElement("canvas");
-terraSprite.width = TERRA_D * TERRA_QUADROS; terraSprite.height = TERRA_D;
-
-/* Luz de uma esfera, para todos os planetas usarem a mesma.
-   Duas coisas somadas: a direção da luz (alto-esquerda, como no resto do
-   jogo) e o ESCURECIMENTO DE BORDA — quanto mais perto do limbo, mais fraca a
-   luz, porque ali a superfície se inclina para longe de quem olha. É esse
-   segundo termo que faz o disco virar bola; sem ele sobra um fio escuro na
-   volta, que lê como contorno de adesivo. */
-function luzEsfera(dx, dy, R) {
-  const d = Math.min(1, Math.hypot(dx, dy) / R);
-  const borda = Math.sqrt(Math.max(0, 1 - d * d));       // 1 no meio, 0 no limbo
-  const direcao = limitar((-dx - dy) / (R * 1.9) + 0.5, 0, 1);
-  return limitar(direcao * 0.55 + Math.pow(borda, 0.45) * 0.45, 0, 0.999);
-}
-
 /* Largura da linha dy de um círculo de raio R, para os planetas.
    Mede com R + 0,5 — o raio até a BORDA de fora do último pixel, não até o
    centro dele. Com R cravado, a linha do polo saía com 1 px sozinho embaixo
@@ -722,240 +700,130 @@ function meiaLinha(R, dy) {
   return f <= 0 ? -1 : Math.floor(Math.sqrt(f));
 }
 
-function desenharSpriteTerra() {
-  const fx = terraSprite.getContext("2d");
-  const R = CFG.TERRA_RAIO, c = R;
-  const oceano = ["#4f93c9","#74b4e2","#9dd0f2"];
-  const terra  = ["#3f9e74","#5cbf92","#82d9b0"];
-  // não branco puro: no céu claro a calota sumia e comia o polo do desenho
-  const gelo   = ["#a9d0e8","#c8e4f5","#e2f2fc"];
-  const limbo  = "#3a76a6";
+/* ── planetas ────────────────────────────────────────────────
+   Um gerador só para os cinco. Antes cada um tinha seu laço, com iluminação
+   de duas linhas e três tons por material — o resultado eram bolinhas chapadas
+   que só mudavam de cor.
 
-  for (let q = 0; q < TERRA_QUADROS; q++) {
-    const giro = q * (12 / TERRA_QUADROS);
-    for (let y = 0; y < TERRA_D; y++) {
+   Aqui a esfera é iluminada de verdade:
+   · DIFUSA por normal de esfera (N·L), e não por um gradiente em dx+dy;
+   · ESPECULAR, o ponto claro do lado da luz, que é o que dá o "brilho de
+     bola" — sem ele nenhuma esfera pequena convence;
+   · LUZ DE BORDA no limbo escuro, um fio mais claro do lado oposto à luz.
+     É o truque mais barato para descolar o planeta do fundo, e nenhum dos
+     cinco tinha.
+
+   Cada planeta entrega só uma função de superfície, que devolve QUAL material
+   está naquele ponto (oceano, continente, gelo, mancha...). O sombreamento é
+   o mesmo para todos, então eles parecem do mesmo mundo. */
+const LUZ = (() => { const l = [-0.55, -0.6, 0.58];
+  const m = Math.hypot(l[0], l[1], l[2]);
+  return [l[0]/m, l[1]/m, l[2]/m]; })();
+
+function fazerPlaneta(R, quadros, materiais, superficie) {
+  const D = R * 2 + 1;
+  const cv = document.createElement("canvas");
+  cv.width = D * quadros; cv.height = D;
+  const fx = cv.getContext("2d");
+  const c = R;
+
+  for (let q = 0; q < quadros; q++) {
+    const giro = q * (Math.PI * 2 / quadros);
+    for (let y = 0; y < D; y++) {
       const dy = y - c;
       const w = meiaLinha(R, dy);
       if (w < 0) continue;
       for (let x = c - w; x <= c + w; x++) {
         const dx = x - c;
-        const luz = luzEsfera(dx, dy, R);
-        const tom = luz > 0.66 ? 2 : luz > 0.4 ? 1 : 0;
-        let cor;
-        // o fio de contorno acompanha a linha, não o raio: fica de 1 px
-        // uniforme em toda a volta em vez de engrossar em cima e embaixo
-        // só a ponta de cada linha: o fio grosso em cima e embaixo é o que
-        // fazia o degrau da esfera saltar aos olhos
-        // o limbo virou retoque só do lado escuro: do lado da luz a própria
-        // curva de brilho já fecha a bola, e o fio ali só endurecia a silhueta
-        const naBorda = (x === c - w || x === c + w) && luz < 0.52;
-        if (naBorda) {
-          cor = limbo;
-        } else if (Math.abs(dy) > R * 0.62 && Math.abs(dx) < w * 0.5) {
-          // calota medida pela LARGURA da linha, não pelo raio: assim ela
-          // afina junto com o polo em vez de virar uma tampa branca
-          cor = gelo[tom];
-        } else {
-          const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
-          const n = fractal(lon * 3.4 + giro, y * 0.34, CFG.SEMENTE + 5150, 2);
-          cor = n > 0.53 ? terra[tom] : oceano[tom];
-        }
-        fx.fillStyle = cor;
-        fx.fillRect(q * TERRA_D + x, y, 1, 1);
+        // normal da esfera no ponto
+        const d2 = (dx * dx + dy * dy) / ((R + 0.5) * (R + 0.5));
+        const nz = Math.sqrt(Math.max(0.001, 1 - d2));
+        const nx = dx / (R + 0.5), ny = dy / (R + 0.5);
+
+        const dif = Math.max(0, nx * LUZ[0] + ny * LUZ[1] + nz * LUZ[2]);
+        // especular: um ponto claro, concentrado, do lado da luz
+        const esp = Math.pow(dif, 18) * 0.9;
+        // luz de borda: acende o limbo do lado oposto ao sol
+        const borda = Math.pow(1 - nz, 3.2) * (1 - dif) * 0.85;
+
+        let luz = dif * 0.82 + 0.14 + borda;
+        // latitude e longitude aparentes, para a superfície girar junto
+        const lat = Math.asin(limitar(ny, -1, 1));
+        const lon = Math.atan2(nx, nz) + giro;
+        const mat = materiais[superficie(lon, lat, dy / R, dx / R, giro)];
+        const n = mat.length;
+        let i = Math.round((1 - limitar(luz, 0, 1)) * (n - 1));
+        if (esp > 0.28) i = 0;                   // o brilho estoura para o topo
+        fx.fillStyle = mat[limitar(i, 0, n - 1)];
+        fx.fillRect(q * D + x, y, 1, 1);
       }
     }
-    fx.fillStyle = "#ffffff";                   // brilho especular
-    fx.fillRect(q * TERRA_D + c - Math.round(R * 0.45), c - Math.round(R * 0.45), 1, 1);
   }
+  return cv;
 }
-desenharSpriteTerra();
 
-/* ── sprite de Marte: vermelho de verdade ────────────────────
-   Nada de ruído fino: Io era manchado de pontinhos e os dois ficavam
-   parecidos. Aqui as regiões escuras são FAIXAS largas de latitude, que é
-   como Marte se lê de longe — um vermelho forte cortado por mares escuros,
-   com a calota branca só no norte. */
+/* Terra: oceano, continentes e calotas */
+const TERRA_D = CFG.TERRA_RAIO * 2 + 1;
+const TERRA_QUADROS = 8;
+const terraSprite = fazerPlaneta(CFG.TERRA_RAIO, TERRA_QUADROS, [
+  ["#e8f7ff","#a9d8f2","#6fb4e0","#4a90c8","#2f6ea6","#1d4c7a","#123354"],  // oceano
+  ["#eafbe8","#a7e3b4","#6cc98c","#46a86a","#2f8450","#20603a","#144026"],  // terra
+  ["#ffffff","#eef9ff","#d2ecf8","#b0d8ec","#8ebdd6","#6c9cb8","#4d7793"]   // gelo
+], (lon, lat, ny) => {
+  if (Math.abs(ny) > 0.74) return 2;
+  return fractal(Math.cos(lon) * 2.6, Math.sin(lon) * 2.6 + ny * 2.4,
+                 CFG.SEMENTE + 5150, 3) > 0.52 ? 1 : 0;
+});
+
+/* Marte: poeira vermelha, mares escuros e uma calota */
 const MARTE_D = CFG.MARTE_RAIO * 2 + 1;
 const MARTE_QUADROS = 8;
-const marteSprite = document.createElement("canvas");
-marteSprite.width = MARTE_D * MARTE_QUADROS; marteSprite.height = MARTE_D;
+const marteSprite = fazerPlaneta(CFG.MARTE_RAIO, MARTE_QUADROS, [
+  ["#ffd2b0","#ff9e70","#f2683f","#d9472a","#b2321d","#872314","#5c150c"],  // poeira
+  ["#d08d6c","#a85436","#832f1c","#65200f","#4c1509","#360d05","#230703"],  // mares
+  ["#ffffff","#f6ece8","#e2d0c8","#c9b0a6","#a98d84","#886c64","#664e48"]   // calota
+], (lon, lat, ny) => {
+  if (ny < -0.76) return 2;
+  const b = Math.sin(ny * 3.1 + Math.sin(lon * 1.6) * 1.1) +
+            0.5 * Math.sin(ny * 1.4 - lon * 2.1);
+  return b > 0.5 ? 1 : 0;
+});
 
-function desenharSpriteMarte() {
-  const fx = marteSprite.getContext("2d");
-  const R = CFG.MARTE_RAIO, c = R;
-  const vermelho = ["#c2231c","#e33a2b","#f4614a"];   // o corpo, saturado
-  const mar      = ["#a1201a","#bd2f25","#d44a3a"];   // regiões escuras, mas perto
-                                                     // do corpo: com contraste alto
-                                                     // a mancha vira vinco na esfera
-  const gelo     = ["#d8c2ba","#ecdcd6","#f8efeb"];   // sem branco puro
-  const limbo    = "#7a0f10";
-
-  for (let q = 0; q < MARTE_QUADROS; q++) {
-    const giro = q * (Math.PI * 2 / MARTE_QUADROS);
-    for (let y = 0; y < MARTE_D; y++) {
-      const dy = y - c;
-      const w = meiaLinha(R, dy);
-      if (w < 0) continue;
-      for (let x = c - w; x <= c + w; x++) {
-        const dx = x - c;
-        const luz = luzEsfera(dx, dy, R);
-        const tom = luz > 0.66 ? 2 : luz > 0.4 ? 1 : 0;
-        let cor;
-        // só a ponta de cada linha: o fio grosso em cima e embaixo é o que
-        // fazia o degrau da esfera saltar aos olhos
-        const naBorda = (x === c - w || x === c + w) && luz < 0.52;
-        if (naBorda) {
-          cor = limbo;
-        } else if (dy < -R * 0.66 && Math.abs(dx) < w * 0.45) {
-          cor = gelo[tom];                      // calota norte, só uma
-        } else {
-          const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
-          // faixas largas: duas senoides de latitude moduladas pela longitude
-          // frequência alta o bastante para caber 2 ou 3 faixas num raio de 7:
-          // com faixa larga demais sobra uma mancha só, e ela lê como sujeira
-          const faixa = Math.sin(dy * 1.15 + Math.sin(lon + giro) * 1.1) +
-                        0.55 * Math.sin(dy * 0.5 - lon * 1.7 + giro);
-          cor = faixa > 0.35 ? mar[tom] : vermelho[tom];
-        }
-        fx.fillStyle = cor;
-        fx.fillRect(q * MARTE_D + x, y, 1, 1);
-      }
-    }
-    fx.fillStyle = "#ff9d86";                   // brilho quente no alto-esquerda
-    fx.fillRect(q * MARTE_D + c - Math.round(R * 0.45), c - Math.round(R * 0.45), 1, 1);
-  }
-}
-desenharSpriteMarte();
-
-/* ── sprite de Saturno: só o corpo, em amarelo pastel ────────
-   O anel não cabe aqui: ele passa por trás e por diante do planeta, então
-   é desenhado na hora, em duas metades, com o corpo no meio. */
-const SAT_D = CFG.SATURNO_RAIO * 2 + 1;
-const SAT_QUADROS = 8;
-const saturnoSprite = document.createElement("canvas");
-saturnoSprite.width = SAT_D * SAT_QUADROS; saturnoSprite.height = SAT_D;
-
-function desenharSpriteSaturno() {
-  const fx = saturnoSprite.getContext("2d");
-  const R = CFG.SATURNO_RAIO, c = R;
-  const S = COR.saturno;
-  const limbo = S[5];
-
-  for (let q = 0; q < SAT_QUADROS; q++) {
-    const giro = q * (Math.PI * 2 / SAT_QUADROS);
-    for (let y = 0; y < SAT_D; y++) {
-      const dy = y - c;
-      const w = meiaLinha(R, dy);
-      if (w < 0) continue;
-      for (let x = c - w; x <= c + w; x++) {
-        const dx = x - c;
-        const luz = luzEsfera(dx, dy, R);
-        let cor;
-        if ((x === c - w || x === c + w) && luz < 0.52) {
-          cor = limbo;
-        } else {
-          // faixas horizontais suaves, que é o que Saturno tem de marcante
-          const banda = Math.sin(dy * 1.35 + Math.sin(giro) * 0.5) * 0.5 + 0.5;
-          const t = limitar(luz * 0.62 + banda * 0.38, 0, 0.999);
-          cor = S[Math.min(5, Math.floor((1 - t) * 6.2))];
-          // a SOMBRA DO ANEL atravessando o planeta, um pouco abaixo do
-          // equador. É o detalhe que mais entrega "isto tem um anel"
-          const sombra = dy + R * 0.22;
-          if (Math.abs(sombra) < 1.1) cor = S[Math.min(6, Math.floor((1 - t) * 6.2) + 2)];
-        }
-        fx.fillStyle = cor;
-        fx.fillRect(q * SAT_D + x, y, 1, 1);
-      }
-    }
-  }
-}
-desenharSpriteSaturno();
-
-/* ── sprite de Júpiter: faixas roxas e a mancha ──────────────
-   O que identifica Júpiter de longe são as listras horizontais e a mancha
-   oval. As listras aqui são função só de dy, então ficam retas e paralelas;
-   é o que separa a leitura dele da de Marte, cujas faixas ondulam. */
+/* Júpiter: faixas horizontais e a mancha */
 const JUP_D = CFG.JUPITER_RAIO * 2 + 1;
 const JUP_QUADROS = 8;
-const jupiterSprite = document.createElement("canvas");
-jupiterSprite.width = JUP_D * JUP_QUADROS; jupiterSprite.height = JUP_D;
+const jupiterSprite = fazerPlaneta(CFG.JUPITER_RAIO, JUP_QUADROS, [
+  // as duas famílias precisam ser bem diferentes: com rampas vizinhas o
+  // sombreamento come a diferença e o planeta vira uma bola lisa
+  ["#fbf4ff","#e9d8fb","#d0b6f2","#b492e2","#9370c4","#6f5199","#4b356b"],  // faixa clara
+  ["#e4d0f8","#bd9ce6","#9673cc","#7355aa","#553d84","#3b2a5e","#251a3d"],  // faixa escura
+  ["#ffe8f0","#ffc0d0","#f090ab","#d06a88","#a84e68","#7d374b","#552332"]   // a mancha
+], (lon, lat, ny) => {
+  const dl = Math.atan2(Math.sin(lon - 1.0), Math.cos(lon - 1.0));
+  if (Math.abs(dl) < 0.62 && Math.abs(ny - 0.22) < 0.2) return 2;
+  return Math.sin(ny * 7.5) > 0 ? 0 : 1;
+});
 
-function desenharSpriteJupiter() {
-  const fx = jupiterSprite.getContext("2d");
-  const R = CFG.JUPITER_RAIO, c = R;
-  const J = COR.jupiter;
+/* Saturno: creme com faixas suaves */
+const SAT_D = CFG.SATURNO_RAIO * 2 + 1;
+const SAT_QUADROS = 8;
+const saturnoSprite = fazerPlaneta(CFG.SATURNO_RAIO, SAT_QUADROS, [
+  ["#fffdf2","#fff0cc","#f8dda2","#e8c47e","#cba25a","#a17a3e","#6f5027"],
+  ["#fdf3dc","#f2dca6","#dfc077","#c4a054","#a17f3c","#7b5f2a","#52401b"]
+], (lon, lat, ny) => Math.sin(ny * 6.2 + Math.sin(lon) * 0.4) > 0 ? 0 : 1);
 
-  for (let q = 0; q < JUP_QUADROS; q++) {
-    const giro = q * (Math.PI * 2 / JUP_QUADROS);
-    for (let y = 0; y < JUP_D; y++) {
-      const dy = y - c;
-      const w = meiaLinha(R, dy);
-      if (w < 0) continue;
-      for (let x = c - w; x <= c + w; x++) {
-        const dx = x - c;
-        const luz = luzEsfera(dx, dy, R);
-        let cor;
-        if ((x === c - w || x === c + w) && luz < 0.52) {
-          cor = J[5];
-        } else {
-          const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
-          const listra = Math.sin(dy * 1.9) * 0.5 + 0.5;
-          const t = limitar(luz * 0.55 + listra * 0.45, 0, 0.999);
-          cor = J[Math.min(4, Math.floor((1 - t) * 5.2))];
-          // a mancha: uma oval que dá a volta com o planeta
-          const ml = lon + giro;
-          const dml = Math.atan2(Math.sin(ml - 1.1), Math.cos(ml - 1.1));
-          if (Math.abs(dml) < 0.55 && Math.abs(dy - R * 0.22) < R * 0.28)
-            cor = luz > 0.5 ? J[1] : J[2];
-        }
-        fx.fillStyle = cor;
-        fx.fillRect(q * JUP_D + x, y, 1, 1);
-      }
-    }
-  }
-}
-desenharSpriteJupiter();
-
-/* ── sprite de Netuno: azul profundo e saturado ──────────────
-   Faixas suaves e uma mancha escura. Bem mais escuro que a Terra, senão os
-   dois azuis se confundem no campo. */
+/* Netuno: azul profundo com uma mancha escura */
 const NET_D = CFG.NETUNO_RAIO * 2 + 1;
 const NET_QUADROS = 8;
-const netunoSprite = document.createElement("canvas");
-netunoSprite.width = NET_D * NET_QUADROS; netunoSprite.height = NET_D;
-
-function desenharSpriteNetuno() {
-  const fx = netunoSprite.getContext("2d");
-  const R = CFG.NETUNO_RAIO, c = R;
-  const N = COR.netuno;
-
-  for (let q = 0; q < NET_QUADROS; q++) {
-    const giro = q * (Math.PI * 2 / NET_QUADROS);
-    for (let y = 0; y < NET_D; y++) {
-      const dy = y - c;
-      const w = meiaLinha(R, dy);
-      if (w < 0) continue;
-      for (let x = c - w; x <= c + w; x++) {
-        const dx = x - c;
-        const luz = luzEsfera(dx, dy, R);
-        let cor;
-        if ((x === c - w || x === c + w) && luz < 0.52) {
-          cor = N[4];
-        } else {
-          const lon = Math.asin(limitar(dx / Math.sqrt(Math.max(0.01, R * R - dy * dy)), -1, 1));
-          const listra = Math.sin(dy * 1.6 + Math.sin(lon + giro) * 0.4) * 0.5 + 0.5;
-          const t = limitar(luz * 0.6 + listra * 0.4, 0, 0.999);
-          cor = N[Math.min(4, Math.floor((1 - t) * 4.4))];
-          const ml = Math.atan2(Math.sin(lon + giro - 0.8), Math.cos(lon + giro - 0.8));
-          if (Math.abs(ml) < 0.5 && Math.abs(dy + R * 0.15) < R * 0.26) cor = N[4];
-        }
-        fx.fillStyle = cor;
-        fx.fillRect(q * NET_D + x, y, 1, 1);
-      }
-    }
-  }
-}
-desenharSpriteNetuno();
+const netunoSprite = fazerPlaneta(CFG.NETUNO_RAIO, NET_QUADROS, [
+  ["#e6f4ff","#b4d8f8","#7cb0ea","#5389cf","#3765a8","#22467c","#132b52"],
+  ["#c2dbf5","#7fabdd","#5182bc","#345f97","#204373","#132b50","#0a1a33"],
+  ["#a8bede","#6f8fbc","#4a6a98","#324c76","#213458","#14213a","#0b1526"]   // mancha
+], (lon, lat, ny) => {
+  const dl = Math.atan2(Math.sin(lon + 0.8), Math.cos(lon + 0.8));
+  if (Math.abs(dl) < 0.5 && Math.abs(ny + 0.18) < 0.16) return 2;
+  return Math.sin(ny * 5.4 + Math.sin(lon) * 0.3) > 0 ? 0 : 1;
+});
 
 /* ── desenho em pixel cheio (sem antialias) ──────────────────── */
 function disco(cx, cy, raio, cor) {
@@ -1167,7 +1035,9 @@ function botaoJogar() {
   const l = 90, a = 22;
   return { x: Math.round((VL - l) / 2), y: Math.round(VA * 0.60), l: l, a: a };
 }
-function botaoSair() { return { x: Math.round(VL / 2) - 6, y: 3, l: 12, a: 12 }; }
+// canto superior direito, FORA do painel do placar: no meio ele caía em
+// cima das barras, que agora atravessam a tela inteira
+function botaoSair() { return { x: VL - 15, y: 3, l: 12, a: 12 }; }
 function dentro(gx, gy, r, folga) {
   folga = folga || 0;
   return gx >= r.x - folga && gx <= r.x + r.l + folga &&
@@ -2629,9 +2499,10 @@ function anelSaturno(cx, cy, R, frente) {
   const rx = R * 2.15, ry = R * 0.66;
   const incl = 0.9;                              // cisalhamento por linha
   const S = COR.saturno;
-  const faixas = [[1, 0.9, S[4]],                // borda externa, fina e fosca
-                  [0.88, 0.72, S[2]],            // faixa A, a mais clara
-                  [0.66, 0.44, S[3]]];           // faixa B, depois do vão
+  // o anel tem que destoar do corpo: com tons vizinhos ele derrete no planeta
+  const faixas = [[1, 0.9, S[5]],                // borda externa, fina e fosca
+                  [0.88, 0.72, S[3]],            // faixa A, a mais clara
+                  [0.66, 0.44, S[4]]];           // faixa B, depois do vão
   const topo = Math.ceil(ry);
   for (let dy = -topo; dy <= topo; dy++) {
     if ((dy >= 0) !== frente) continue;
@@ -3158,6 +3029,15 @@ function desenharBuraco() {
                      COR.disco, COR.halo, COR.contorno, COR.blush, true);
 }
 
+/* A mesma coroa, miúda, para marcar a linha do primeiro no placar. Repetir
+   o símbolo que já está na cabeça dele liga as duas leituras sem legenda. */
+const COROA_HUD = ["#.#.#", "#####", ".###."];
+function desenharCoroaHUD(x, y, cor) {
+  const bal = Math.sin(quadro * 0.09) < 0 ? 0 : -1;   // um pulinho de 1 px
+  carimbo(COROA_HUD, x + 2, y + bal, COR.coroa[2]);
+  carimbo(COROA_HUD, x + 2, y + bal - 1, COR.coroa[1]);
+}
+
 /* A coroa do líder. Ela flutua (não encosta na cabeça), balança devagar e,
    quando troca de dono, CAI de cima com um repique — é o movimento que
    anuncia a virada, mais do que a coroa em si. */
@@ -3471,30 +3351,71 @@ function desenharHUD() {
   // Seta é só para jogador. Com quatro em campo, mais cometa e cadente, a
   // borda virava um festival de setas e ninguém achava o que importava.
   desenharMarcaRival();
-  /* Placar simétrico no topo: você à esquerda, o rival à direita, os dois na
-     MESMA altura, e o botão de sair no meio. Antes o X ficava no canto e
-     empurrava o bloco do rival para baixo — as duas barras nunca casavam. */
-  const b0 = botaoSair();
-  const LARG = Math.max(28, Math.min(52, b0.x - 5 - 6));
-  const meu = "" + buraco.comidas;
-  const alvo = "/" + CFG.META;
+  /* PLACAR EM RANKING.
+     O layout anterior era simétrico — você à esquerda, os rivais à direita —
+     e isso escondia justamente a informação que decide a partida: quem está
+     na frente e por quanto. Com quatro em campo o jogador tinha que comparar
+     quatro números espalhados.
 
-  texto(meu, 5, 4, COR.hud, 1);
-  texto(alvo, 5 + larguraTexto(meu, 1) + 1, 4, COR.hudFraco, 1);
-  barra(5, 13, LARG, buraco.nivel < CFG.NIVEL_MAX
-        ? buraco.progresso / custoDoNivel(buraco.nivel) : 1, COR.disco[4]);
+     Agora é uma coluna só, ordenada, com a barra medida rumo à META (300) e
+     não ao próximo nível: é a corrida que importa, e a barra vira a leitura
+     imediata da distância entre os concorrentes. A coroa aparece na linha do
+     primeiro, do mesmo jeito que aparece na cabeça dele.
+     A sua linha ganha um fundo e uma seta, porque com quatro cores parecidas
+     achar a sua no meio custava um segundo que ninguém tem. */
+  const ordem = todos().slice().sort((a, b) => b.comidas - a.comidas);
+  const ALT = 9;
+  // o painel para antes do X: barra passando por baixo de botão não se lê
+  const painel = { x: 4, y: 3, l: VL - 8 - 15, a: ordem.length * ALT + 4 };
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = COR.painel;
+  ctx.fillRect(painel.x, painel.y, painel.l, painel.a);
+  ctx.globalAlpha = 1;
 
-  // os rivais empilham à direita, um por linha, na cor de cada um
-  let yr = 4;
-  for (const r of rivais) {
-    const p = paletaDe(r);
-    const n = "" + r.comidas;
-    const tot = larguraTexto(n, 1) + 1 + larguraTexto(alvo, 1);
-    texto(n, VL - 5 - tot, yr, p.disco[6], 1);
-    texto(alvo, VL - 5 - larguraTexto(alvo, 1), yr, COR.hudFraco, 1);
-    barra(VL - 5 - LARG, yr + 9, LARG, r.nivel < CFG.NIVEL_MAX
-          ? r.progresso / custoDoNivel(r.nivel) : 1, p.disco[5]);
-    yr += 16;
+  const bSair = botaoSair();
+  const xNum = painel.x + 4;
+  const larguraNum = larguraTexto("000", 1);
+  const xBarra = xNum + larguraNum + 4;
+  const larBarra = painel.x + painel.l - 4 - xBarra - 9;    // deixa espaço p/ a coroa
+
+  for (let i = 0; i < ordem.length; i++) {
+    const p = ordem[i];
+    const eu = p === buraco;
+    const cor = eu ? COR.hud : paletaDe(p).disco[6];
+    const y = painel.y + 2 + i * ALT;
+
+    if (eu) {                                    // a sua linha em destaque
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = COR.borda;
+      ctx.fillRect(painel.x + 1, y - 1, painel.l - 2, ALT - 1);
+      ctx.globalAlpha = 1;
+    }
+    // pastilha da cor de cada um, para casar com o boneco em campo
+    ctx.fillStyle = cor;
+    ctx.fillRect(painel.x + 1, y, 2, ALT - 2);
+
+    const n = "" + p.comidas;
+    texto(n, xNum + larguraNum - larguraTexto(n, 1), y - 1, cor, 1);
+
+    // barra rumo à meta
+    ctx.fillStyle = COR.borda;
+    ctx.fillRect(xBarra, y + 1, larBarra, 4);
+    ctx.fillStyle = COR.vazio;
+    ctx.fillRect(xBarra + 1, y + 2, larBarra - 2, 2);
+    const cheio = Math.round((larBarra - 2) * Math.min(1, p.comidas / CFG.META));
+    ctx.fillStyle = cor;
+    ctx.fillRect(xBarra + 1, y + 2, cheio, 2);
+
+    if (p === primeiro) desenharCoroaHUD(xBarra + larBarra + 4, y + 2, cor);
+  }
+
+  /* seu progresso para o próximo nível, um fio fino embaixo do painel */
+  if (buraco.nivel < CFG.NIVEL_MAX) {
+    const prog = buraco.progresso / custoDoNivel(buraco.nivel);
+    ctx.fillStyle = COR.borda;
+    ctx.fillRect(painel.x, painel.y + painel.a, painel.l, 2);
+    ctx.fillStyle = COR.disco[5];
+    ctx.fillRect(painel.x, painel.y + painel.a, Math.round(painel.l * prog), 2);
   }
 
   // sobe um pouco: pegar a cadente dá 10 estrelas e quase sempre sobe de
