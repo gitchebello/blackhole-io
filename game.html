@@ -70,13 +70,13 @@ const CFG = {
   GIRO_SUCCAO: 1.2,      // quanto a estrela rodopia enquanto é sugada
 
   /* Terra */
-  TERRA_RAIO: 7,         // raio aparente da Terra, na tela
+  TERRA_RAIO: 8,         // raio aparente da Terra, na tela
   TERRA_ESPERA: 600,     // quadros até uma nova Terra aparecer (600 = 10s)
   TERRA_TURBO: 600,      // duração do turbo (600 = 10s)
   TERRA_FATOR: 1.5,      // multiplicador de velocidade do turbo
 
   /* Marte — o planeta vermelho: vira ímã por um tempo */
-  MARTE_RAIO: 7,         // do mesmo tamanho da Terra
+  MARTE_RAIO: 8,         // do mesmo tamanho da Terra
   MARTE_ESPERA: 600,     // mesma frequência da Terra (600 = 10s)
   MARTE_IMA: 300,        // duração do ímã (300 = 5s)
   MARTE_ALCANCE: 1.35,   // quanto o alcance de sucção estica no ímã
@@ -84,7 +84,7 @@ const CFG = {
   MARTE_CLARAO: 24,      // flash vermelho ao devorá-lo
 
   /* Saturno — o dos anéis: vira uma torre de gelo por um tempo */
-  SATURNO_RAIO: 7,
+  SATURNO_RAIO: 8,
   SATURNO_ESPERA: 600,   // mesma frequência da Terra e de Marte (600 = 10s)
   SATURNO_TIRO: 480,     // duração do poder (480 = 8s)
   SATURNO_CADENCIA: 40,  // quadros entre um bloco e o outro
@@ -98,7 +98,7 @@ const CFG = {
   SATURNO_CLARAO: 24,
 
   /* Júpiter — o gigante roxo: rouba estrelas de perto */
-  JUPITER_RAIO: 7,
+  JUPITER_RAIO: 8,
   JUPITER_ESPERA: 600,   // mesma frequência dos outros planetas
   JUPITER_DRENO: 600,    // duração do poder (600 = 10s)
   JUPITER_RITMO: 20,     // 3 estrelas por segundo
@@ -106,7 +106,7 @@ const CFG = {
   JUPITER_CLARAO: 26,
 
   /* Netuno — o azul profundo: escudo total por um tempo */
-  NETUNO_RAIO: 7,
+  NETUNO_RAIO: 8,
   NETUNO_ESPERA: 600,    // mesma frequência dos outros planetas
   NETUNO_IMUNE: 600,     // 10s sem levar golpe nenhum
   NETUNO_CLARAO: 26,
@@ -221,7 +221,7 @@ const PALETAS = {
     discoV: ["#f3fdf7","#d9f7e6","#b4ecce","#8adfb2","#5ecb94","#3cae7b","#2c8f65","#1f7050"],
     glowTerra:"#5aa8e0",
     glowMarte:"#e8342a",
-    saturno: ["#fffdf0","#fff4cf","#ffe9a8","#f2d074","#d4ac4a","#a8842f"],
+    saturno: ["#fffaea","#fff0cd","#ffe3a6","#f6cd7c","#dcae57","#b78a3c","#8c6628"],
     bloco:   ["#f2fcff","#cdeefb","#a2daf2","#74bfe0"],
     glowSaturno:"#e8b53a",     // dourado, não amarelo pastel: o corpo já é claro
     jupiter: ["#f6efff","#e6d6f7","#cdb2ee","#ac8ade","#8a63c6","#6a45a0"],
@@ -296,7 +296,7 @@ const PALETAS = {
     discoV: ["#0d2a1c","#12432c","#1a5f3f","#248055","#2fa26e","#46c489","#68dda4","#96eec2"],
     glowTerra:"#4f9fe0",
     glowMarte:"#ff3a2c",
-    saturno: ["#fffdf0","#fff4cf","#ffe9a8","#f2d074","#d4ac4a","#a8842f"],
+    saturno: ["#fffaea","#fff0cd","#ffe3a6","#f6cd7c","#dcae57","#b78a3c","#8c6628"],
     bloco:   ["#f2fcff","#cdeefb","#a2daf2","#74bfe0"],
     glowSaturno:"#f0bf46",
     jupiter: ["#f6efff","#e6d6f7","#cdb2ee","#ac8ade","#8a63c6","#6a45a0"],
@@ -712,10 +712,14 @@ function luzEsfera(dx, dy, R) {
   return limitar(direcao * 0.55 + Math.pow(borda, 0.45) * 0.45, 0, 0.999);
 }
 
-/* largura da linha dy de um círculo de raio R, do jeito do disco() */
+/* Largura da linha dy de um círculo de raio R, para os planetas.
+   Mede com R + 0,5 — o raio até a BORDA de fora do último pixel, não até o
+   centro dele. Com R cravado, a linha do polo saía com 1 px sozinho embaixo
+   de uma de 9, e o que se via era uma bola cortada reta em cima e embaixo.
+   Com meio pixel a mais, o polo fecha com 5 px e a bola arredonda. */
 function meiaLinha(R, dy) {
-  const f = R * R - dy * dy;
-  return f <= 0 ? -1 : Math.floor(Math.sqrt(f) + 0.5);
+  const f = (R + 0.5) * (R + 0.5) - dy * dy;
+  return f <= 0 ? -1 : Math.floor(Math.sqrt(f));
 }
 
 function desenharSpriteTerra() {
@@ -723,7 +727,8 @@ function desenharSpriteTerra() {
   const R = CFG.TERRA_RAIO, c = R;
   const oceano = ["#4f93c9","#74b4e2","#9dd0f2"];
   const terra  = ["#3f9e74","#5cbf92","#82d9b0"];
-  const gelo   = ["#d2ecf8","#e8f6ff","#ffffff"];
+  // não branco puro: no céu claro a calota sumia e comia o polo do desenho
+  const gelo   = ["#a9d0e8","#c8e4f5","#e2f2fc"];
   const limbo  = "#3a76a6";
 
   for (let q = 0; q < TERRA_QUADROS; q++) {
@@ -782,7 +787,7 @@ function desenharSpriteMarte() {
   const mar      = ["#a1201a","#bd2f25","#d44a3a"];   // regiões escuras, mas perto
                                                      // do corpo: com contraste alto
                                                      // a mancha vira vinco na esfera
-  const gelo     = ["#f0e4e0","#faf2ef","#ffffff"];
+  const gelo     = ["#d8c2ba","#ecdcd6","#f8efeb"];   // sem branco puro
   const limbo    = "#7a0f10";
 
   for (let q = 0; q < MARTE_QUADROS; q++) {
@@ -850,10 +855,13 @@ function desenharSpriteSaturno() {
           cor = limbo;
         } else {
           // faixas horizontais suaves, que é o que Saturno tem de marcante
-          const banda = Math.sin(dy * 1.5 + Math.sin(giro) * 0.5) * 0.5 + 0.5;
-          // faixa mais larga de tons: o corpo estava pálido demais e sumia
+          const banda = Math.sin(dy * 1.35 + Math.sin(giro) * 0.5) * 0.5 + 0.5;
           const t = limitar(luz * 0.62 + banda * 0.38, 0, 0.999);
-          cor = S[Math.min(4, Math.floor((1 - t) * 5.6))];
+          cor = S[Math.min(5, Math.floor((1 - t) * 6.2))];
+          // a SOMBRA DO ANEL atravessando o planeta, um pouco abaixo do
+          // equador. É o detalhe que mais entrega "isto tem um anel"
+          const sombra = dy + R * 0.22;
+          if (Math.abs(sombra) < 1.1) cor = S[Math.min(6, Math.floor((1 - t) * 6.2) + 2)];
         }
         fx.fillStyle = cor;
         fx.fillRect(q * SAT_D + x, y, 1, 1);
@@ -1033,9 +1041,10 @@ const OLHOS_ENJOO = [
 /* A coroa do primeiro lugar, em três tamanhos como o resto dos sprites:
    um desenho só ficaria grande demais no boneco pequeno e sumiria no grande. */
 const COROAS = [
-  ["#.#.#", "#####", ".###."],
   ["#..#..#", "#.###.#", "#######", ".#####."],
-  ["#...#...#", "#.#.#.#.#", "#########", "#########", ".#######."]
+  ["#...#...#", "#.#.#.#.#", "#########", "#########", ".#######."],
+  ["#.....#.....#", "#.....#.....#", "#..#..#..#..#", "#.###.#.###.#",
+   "#############", "#############", ".###########.", "..#########.."]
 ];
 const BOCAS_O = [                          // boca de "o" na hora da mordida
   [".#.", "###", ".#."],
@@ -2606,19 +2615,23 @@ function faiscarIma() {
    frente depois. Sem isso o anel some atrás do planeta ou passa por cima dele
    inteiro, e nos dois casos a leitura de "planeta com anel" se perde.
 
-   Ele é desenhado por LINHA, como o resto do jogo, e a inclinação é um
-   cisalhamento (cada linha desliza um tanto para o lado) em vez de uma
-   rotação. Rotacionar quebraria as linhas horizontais e o anel voltaria a
-   sair pontilhado; cisalhando, cada linha continua um traço cheio.
-   Duas faixas com um vão entre elas — a divisão é o que faz parecer anel de
-   Saturno, e não um aro. */
+   Desenhado por LINHA, com a inclinação feita por cisalhamento (cada linha
+   desliza um tanto para o lado) em vez de rotação: rotacionar quebra as
+   linhas horizontais e o anel sai pontilhado.
+
+   Três coisas fazem ele parecer o anel de Saturno e não um aro:
+   1. a DIVISÃO DE CASSINI — o vão escuro entre as duas faixas principais;
+   2. a faixa externa mais apagada que a interna, que é como ele se vê;
+   3. a SOMBRA DO PLANETA projetada sobre a metade de trás, do lado oposto à
+      luz. É ela que diz que o anel passa por trás de uma bola, e não em volta
+      de um disco chapado. */
 function anelSaturno(cx, cy, R, frente) {
-  // ry precisa render umas 9 linhas: com 7 as duas faixas e o vão entre elas
-  // não cabem e o anel vira um borrão colado no corpo
-  const rx = R * 2, ry = R * 0.62;
-  const incl = 0.95;                             // cisalhamento por linha
-  const faixas = [[1, 0.82, COR.saturno[4]],     // externa, mais escura
-                  [0.7, 0.46, COR.saturno[2]]];  // interna, clara
+  const rx = R * 2.15, ry = R * 0.66;
+  const incl = 0.9;                              // cisalhamento por linha
+  const S = COR.saturno;
+  const faixas = [[1, 0.9, S[4]],                // borda externa, fina e fosca
+                  [0.88, 0.72, S[2]],            // faixa A, a mais clara
+                  [0.66, 0.44, S[3]]];           // faixa B, depois do vão
   const topo = Math.ceil(ry);
   for (let dy = -topo; dy <= topo; dy++) {
     if ((dy >= 0) !== frente) continue;
@@ -2629,12 +2642,44 @@ function anelSaturno(cx, cy, R, frente) {
       const xo = rx * ko * Math.sqrt(fo);
       const fi = 1 - (dy / (ry * ki)) * (dy / (ry * ki));
       const xi = fi > 0 ? rx * ki * Math.sqrt(fi) : 0;
-      ctx.fillStyle = cor;
       const y = Math.round(cy + dy);
       const e0 = Math.round(cx + desliza - xo), e1 = Math.round(cx + desliza - xi);
       const d0 = Math.round(cx + desliza + xi), d1 = Math.round(cx + desliza + xo);
+      // a luz vem do alto-esquerda, então a sombra cai à direita e atrás
+      const naSombra = !frente;
+      ctx.fillStyle = cor;
       if (e1 > e0) ctx.fillRect(e0, y, e1 - e0, 1);
-      if (d1 > d0) ctx.fillRect(d0, y, d1 - d0, 1);
+      if (d1 > d0) {
+        if (naSombra) {
+          const corte = Math.round(cx + desliza + R * 0.35);
+          if (corte > d0) ctx.fillRect(d0, y, Math.min(d1, corte) - d0, 1);
+          if (d1 > corte) {                      // trecho na sombra do planeta
+            ctx.fillStyle = S[6];
+            ctx.globalAlpha = 0.75;
+            ctx.fillRect(Math.max(d0, corte), y, d1 - Math.max(d0, corte), 1);
+            ctx.globalAlpha = 1;
+          }
+        } else {
+          ctx.fillRect(d0, y, d1 - d0, 1);
+        }
+      }
+      // Na metade da FRENTE, o trecho que passa por cima do planeta sai mais
+      // escuro. Sem isso ele vira só mais uma faixa do corpo, e a leitura de
+      // "o anel está na minha frente" se perde justamente no ponto que mais
+      // conta para entender a forma.
+      if (frente && Math.abs(dy) < R) {
+        const dentro0 = Math.max(e0, Math.round(cx - R));
+        const dentro1 = Math.min(d1, Math.round(cx + R));
+        if (dentro1 > dentro0) {
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = COR.saturno[6];
+          const a0 = Math.max(dentro0, e0), a1 = Math.min(dentro1, e1);
+          if (a1 > a0) ctx.fillRect(a0, y, a1 - a0, 1);
+          const b0 = Math.max(dentro0, d0), b1 = Math.min(dentro1, d1);
+          if (b1 > b0) ctx.fillRect(b0, y, b1 - b0, 1);
+          ctx.globalAlpha = 1;
+        }
+      }
     }
   }
 }
@@ -3117,16 +3162,20 @@ function desenharBuraco() {
    quando troca de dono, CAI de cima com um repique — é o movimento que
    anuncia a virada, mais do que a coroa em si. */
 function desenharCoroa(p, bx, by, r) {
-  const t = COROAS[r < 13 ? 0 : r < 22 ? 1 : 2];
-  const bal = Math.sin(quadro * 0.075) * 1.2;
-  // entrada: vem de cima e passa do ponto antes de assentar
+  const t = COROAS[r < 14 ? 0 : r < 24 ? 1 : 2];
+  // balanço mais largo e mais alto: ela precisa parecer solta no ar, não
+  // apoiada na cabeça
+  const bal = Math.sin(quadro * 0.062) * 2.2;
   const a = coroaAnim;
-  const queda = a > 0 ? -Math.pow(a, 1.6) * (r + 26) + Math.sin(a * Math.PI) * 4 : 0;
-  const cy = by - r - 5 - t.length + bal + queda;
+  const queda = a > 0 ? -Math.pow(a, 1.6) * (r + 30) + Math.sin(a * Math.PI) * 5 : 0;
+  const cy = by - r - 10 - t.length + bal + queda;
   const giro = a > 0 ? Math.sin(a * Math.PI * 3) * 2 * a : 0;
 
-  ctx.globalAlpha = 0.5;                          // brilhinho por baixo
-  disco(bx + giro, cy + 1, t.length * 0.9, COR.coroa[0]);
+  ctx.globalAlpha = 0.45;                         // brilhinho por baixo
+  disco(bx + giro, cy + 1, t.length * 0.85, COR.coroa[0]);
+  // um risco de sombra na cabeça, logo abaixo: é o que diz que ela flutua
+  ctx.globalAlpha = 0.22 - Math.sin(quadro * 0.062) * 0.06;
+  oval(bx, by - r + 1, t[0].length * 0.34, 1, COR.coroa[2]);
   ctx.globalAlpha = 1;
   carimbo(t, bx + giro, cy + 1, COR.coroa[2]);    // sombra, meio pixel abaixo
   carimbo(t, bx + giro, cy, COR.coroa[1]);
