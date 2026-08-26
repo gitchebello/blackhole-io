@@ -214,6 +214,11 @@ const CFG = {
   ESPIRAL_MAX: 2,        // e onde chega no máximo (~1,3 volta por segundo)
   // ~70% mais fraco que a primeira versão: com o buraco grande, o alcance já
   // é enorme, e um multiplicador alto por cima varria a tela de estrelas
+  /* o freio e o limiar de "parado" do modo sucção. Em 0,72 ele para em cerca
+     de 6 quadros vindo da velocidade máxima — rápido o bastante para o freio
+     parecer resposta ao comando, e não um deslize longo */
+  SUCCAO_FREIO: 0.72,     // atrito por quadro enquanto o modo está acionado
+  SUCCAO_PARADO: 0.35,    // velocidade de tela abaixo da qual ele conta parado
   ESPIRAL_ALCANCE: 0.33,  // quanto o alcance de sucção estica no máximo
   ESPIRAL_FORCA: 0.48,    // e quanto o puxão fica mais firme
   ESPIRAL_PLANETA: 0.15,  // com que força os planetas vêm junto
@@ -2247,7 +2252,7 @@ function passo() {
   }
 
   /* — direção — */
-  let acelerando = false;
+  let acelerando = false, freando = false;
   if (cena === "menu") {
     // no menu ele fica parado, esperando: só o disco de acreção gira
     buraco.vx = buraco.vy = 0;
@@ -2267,18 +2272,38 @@ function passo() {
        vezes do gesto de espiral. Tem de ser um DESVIO de lerEspiral(), e não
        um acréscimo depois dela: sem dedo na tela ela zera `espiral` todo
        quadro, então somar por cima só rendia o valor de um quadro só. */
-    if (teclas.Shift || teclas[" "]) espiral = Math.min(1, espiral + 0.14);
-    else lerEspiral();
-    // rodando o dedo, ele não sai andando: o gesto vira rotação, não empurrão.
-    // Sem isso o buraco descreveria círculos junto com o dedo e o modo sucção
-    // ficaria impossível de usar parado, que é o ponto dele
-    if (espiral > 0.15) acelerando = false;
+    let sugando;
+    if (teclas.Shift || teclas[" "]) {
+      sugando = true;
+      espiral = Math.min(1, espiral + 0.14);
+    } else {
+      lerEspiral();
+      // rodando o dedo, ele não sai andando: o gesto vira rotação, não
+      // empurrão. Sem isso o buraco descreveria círculos junto com o dedo
+      sugando = espiral > 0.15;
+    }
+
     let tx = 0, ty = 0;
     if (teclas.ArrowLeft  || teclas.a || teclas.A) tx -= 1;
     if (teclas.ArrowRight || teclas.d || teclas.D) tx += 1;
     if (teclas.ArrowUp    || teclas.w || teclas.W) ty -= 1;
     if (teclas.ArrowDown  || teclas.s || teclas.S) ty += 1;
     if (tx || ty) { buraco.ang = Math.atan2(ty, tx); acelerando = true; }
+
+    /* SUCÇÃO SÓ DE PÉ FIRME. Sugar andando virava "segura o espaço e passeia":
+       no teclado não custa nada manter a tecla apertada, e o modo perdia o
+       preço que ele tem no toque, onde é preciso rodar o dedo o tempo todo.
+       Agora acionar já FREIA, e o poço só abre depois que ele de fato parou.
+       A conta da velocidade é em pixels de TELA (por isso o × zoom): em mundo
+       o mesmo movimento vale números diferentes a cada nível de câmera. */
+    if (sugando) {
+      acelerando = false;
+      freando = true;
+      if (Math.hypot(buraco.vx, buraco.vy) * zoom > CFG.SUCCAO_PARADO) espiral = 0;
+    }
+    // ^ DEPOIS das setas de propósito: elas ligam `acelerando` de volta, e com
+    //   o freio antes delas dava para sair andando a 40% da velocidade com a
+    //   tecla de sucção apertada — exatamente o passeio que era para acabar
   }
 
   /* — movimento: tudo é pensado em pixels de tela e convertido pelo zoom,
@@ -2290,7 +2315,8 @@ function passo() {
   const fator = (turbo > 0 ? CFG.TERRA_FATOR : 1) *
                 (buraco.enjoo > 0 ? CFG.COMETA_FREIO : 1);
   const acel = (acelerando ? CFG.ACEL * fator : 0) / zoom;
-  const atrito = zonzo ? CFG.COLISAO_ARRASTO : CFG.ATRITO;
+  const atrito = zonzo ? CFG.COLISAO_ARRASTO
+               : freando ? CFG.SUCCAO_FREIO : CFG.ATRITO;
   buraco.vx = (buraco.vx + Math.cos(buraco.ang) * acel) * atrito;
   buraco.vy = (buraco.vy + Math.sin(buraco.ang) * acel) * atrito;
   const v = Math.hypot(buraco.vx, buraco.vy), vm = velMaxTela() / zoom;
@@ -4437,7 +4463,7 @@ function desenharMenu() {
      título ele batia no boneco que fica esperando no meio da tela. */
   const rodape = bsr.y + bsr.a + 9;
   if (PONTEIRO_FINO && rodape + FONTE_H <= VA)
-    textoCentro("wasd mover   -   shift sugar", rodape, COR.hudFraco, 1);
+    textoCentro("wasd anda   -   shift suga parado", rodape, COR.hudFraco, 1);
 
   const b = comprimir(botaoJogar(), "jogar");
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
