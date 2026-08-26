@@ -144,6 +144,22 @@ const CFG = {
   RIVAL_MARGEM: 8,       // quantas estrelas a mais ele precisa ter para
                          // achar que vale a pena ir para cima de alguém
   RIVAL_CACADA: 0.8,     // e a que distância procura vítima, em telas
+  RIVAL_ALCANCE_ARMA: 1.6, // até que distância vale ir de arma na mão atrás
+                           // do líder, em telas; mais longe que isso o poder
+                           // acaba na viagem e ele mira em quem estiver perto
+  RIVAL_ALVO_MAIOR: true,  // a vítima é o MAIOR que ele ainda ganha, não o
+                           // mais perto (com false, comportamento antigo)
+  /* 1,4 e não 2,2: esticar demais a caçada faz o rival atravessar meia arena
+     sem colher nada, e o que ele tira na trombada (5) não paga a viagem. */
+  RIVAL_CACADA_LIDER: 1.4, // atrás do líder ele vai mais longe
+  /* DESVIAR de quem tem mais estrela foi tentado e MEDIDO como pior, nas duas
+     versões: meia-volta e contorno de 90 graus. Trombar com quem está na
+     frente custa cinco estrelas, mas passar a partida escapando custa mais —
+     cada desvio é tempo sem colher, e o líder está sempre por perto porque os
+     dois disputam as mesmas estrelas. Em 90 s de partida a vantagem do
+     jogador ia de +68 (sem desvio) para +225 (com desvio) no duelo. */
+  RIVAL_FOME_ARMA: 2,      // o quanto ele desvia da rota por um planeta
+                           // quando está atrás no placar (1.3 = normal)
   RIVAL_TEIMOSIA: 100,   // quadros que ele insiste na vítima escolhida
 
   /* efeito da Terra */
@@ -1787,7 +1803,17 @@ function passoRival(rival, L) {
   // alguém: o poder só rende com os dois na mesma tela. A presa é o líder que
   // não seja ele — atacar quem está na frente é o que mantém a corrida viva
   const caçando = rival.tiro > 0 || rival.dreno > 0;
-  const presa = caçando ? lider(rival) : null;
+  /* Com arma na mão a presa é o líder — mas só se der para alcançá-lo antes
+     de o poder acabar. Atravessar a arena atrás do primeiro colocado com 8
+     segundos de gelo no bolso terminava com o poder vencido no caminho e
+     ninguém atingido; nesse caso vale mais gastar em quem estiver por perto. */
+  let presa = null;
+  if (caçando) {
+    presa = lider(rival);
+    if (presa && Math.hypot(presa.x - rival.x, presa.y - rival.y) >
+                 visaoL() * CFG.RIVAL_ALCANCE_ARMA)
+      presa = maisPerto(rival) || presa;
+  }
   // Sem poder na mão, ainda há um motivo para procurar briga: na trombada
   // quem tem MENOS estrela é que paga. Se ele está por cima com folga, ir
   // para cima de alguém menor é lucro certo — e é o que faz a liderança
@@ -1820,13 +1846,29 @@ function passoRival(rival, L) {
     rival.pensar = 1;
   } else if (--rival.pensar <= 0 || !vivo) {
     rival.pensar = CFG.RIVAL_PENSAR + Math.floor(Math.random() * CFG.RIVAL_PENSAR);
+    /* Ficar COLADO no líder para disputar as mesmas estrelas foi tentado e
+       medido como pior: perto do líder o rival trombava com ele, e na trombada
+       quem tem menos estrela é quem paga. Sem arma na mão, chegar perto de
+       quem está na frente é só entregar cinco estrelas. */
     let melhor = null, md = Infinity;
     for (const e of estrelas) {
       const d = Math.hypot(e.x - rival.x, e.y - rival.y);
       if (d < md) { md = d; melhor = e; }
     }
-    for (const o of [terra, marte, saturno, jupiter, netuno])
-      if (o && Math.hypot(o.x - rival.x, o.y - rival.y) < md * 1.3) melhor = o;
+    /* Estando ATRÁS no placar, um planeta vale muito mais que uma estrela: é
+       arma para cima de quem está na frente. Ele então aceita desviar bem mais
+       da rota para pegar um. O laço também passou a escolher o planeta MAIS
+       PERTO — antes ficava com o último da lista que coubesse no limite, que
+       podia ser o mais distante dos cinco. */
+    const chefe = lider(rival);
+    const atras = chefe && chefe.comidas - rival.comidas >= CFG.RIVAL_MARGEM;
+    const limite = md * (atras ? CFG.RIVAL_FOME_ARMA : 1.3);
+    let mp = Infinity;
+    for (const o of [terra, marte, saturno, jupiter, netuno]) {
+      if (!o) continue;
+      const d = Math.hypot(o.x - rival.x, o.y - rival.y);
+      if (d < limite && d < mp) { mp = d; melhor = o; }
+    }
     rival.alvo = melhor;
   }
   if (rival.alvo) {
@@ -1863,14 +1905,24 @@ function passoRival(rival, L) {
 /* O alvo de uma trombada proposital: o mais próximo que tenha bem menos
    estrela, esteja perto e não esteja de escudo. Sem a margem, dois quase
    empatados ficariam se perseguindo e a trombada viraria loteria. */
+/* A vítima é o MAIOR que ele ainda ganha, não o mais perto. Antes ele batia
+   em quem estivesse à mão, e o resultado era a CPU passar a partida inteira
+   moendo o lanterna enquanto o líder disparava sozinho. Como na trombada quem
+   paga é quem tem MENOS estrela, ir para cima do primeiro colocado que ele
+   ainda vence é ao mesmo tempo a jogada mais lucrativa e a que segura a
+   corrida — e é por isso que ele anda bem mais longe atrás do líder. */
 function presaFraca(quem) {
-  const alcance = visaoL() * CFG.RIVAL_CACADA;
-  let melhor = null, md = Infinity;
+  const chefe = lider(quem);
+  const base = visaoL() * CFG.RIVAL_CACADA;
+  let melhor = null, mc = -1, md = Infinity;
   for (const p of todos()) {
     if (p === quem || p.imune > 0) continue;
     if (quem.comidas - p.comidas < CFG.RIVAL_MARGEM) continue;
     const d = Math.hypot(p.x - quem.x, p.y - quem.y);
-    if (d < md && d < alcance) { md = d; melhor = p; }
+    if (d > base * (p === chefe ? CFG.RIVAL_CACADA_LIDER : 1)) continue;
+    // chave de teste: com ela desligada ele volta a bater no mais PERTO
+    const peso = CFG.RIVAL_ALVO_MAIOR ? p.comidas : -d;
+    if (peso > mc || (peso === mc && d < md)) { mc = peso; md = d; melhor = p; }
   }
   return melhor;
 }
