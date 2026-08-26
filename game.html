@@ -574,10 +574,28 @@ const ctx = tela.getContext("2d", { alpha: false });
 
 let VL = 240, VA = 400, escala = 2;
 
+/* Tela de referência do projeto: o celular em pé. É a medida com que tudo foi
+   desenhado e balanceado, e é dela que sai o tamanho do mundo. */
+const REF_L = 195, REF_A = 390;
+const AREA_ALVO = REF_L * REF_A * 1.05;   // quanto de campo cabe na tela
+/* Altura de canvas que o menu precisa para caber: título, JOGAR, oponentes e
+   os dois botões de ícone. Em 250 o celular DEITADO caía para escala 1 — cada
+   pixel do jogo virava um pixel da tela e a arte pixelada sumia. */
+const VA_MINIMO = 170;
+
+/* A escala saía de `largura / 200`, que só faz sentido em tela EM PÉ. Num
+   monitor deitado de 1920 isso dava escala 10 e um canvas de 192x108: o
+   personagem enchia a tela e não sobrava campo nenhum para ver. Agora a
+   escala sai da ÁREA da janela, então o jogador vê mais ou menos a mesma
+   quantidade de jogo em qualquer formato de tela — só que distribuída no
+   formato dele. O piso de altura é para a UI (menu e placar final) não
+   estourar em monitor muito largo e baixo. */
 function redimensionar() {
   const sl = Math.max(1, window.innerWidth);
   const sa = Math.max(1, window.innerHeight);
-  escala = Math.max(1, Math.round(sl / 200));
+  const porArea = Math.max(1, Math.round(Math.sqrt(sl * sa / AREA_ALVO)));
+  const porAltura = Math.max(1, Math.floor(sa / VA_MINIMO));
+  escala = Math.max(1, Math.min(porArea, porAltura));
   VL = Math.ceil(sl / escala);
   VA = Math.ceil(sa / escala);
   tela.width = VL; tela.height = VA;
@@ -590,9 +608,13 @@ window.addEventListener("resize", () => { redimensionar(); });
 
 /* ── o mundo é do tamanho do universo TOTALMENTE expandido; a área
       jogável começa pequena no meio e vai abrindo conforme o nível ── */
+/* O mundo tem tamanho FIXO, tirado da tela de referência e não da janela de
+   quem está jogando. É o que faz a partida ser a mesma no celular e no
+   monitor — e, de quebra, é o que permite redimensionar a janela sem ter de
+   recozinhar as nebulosas, que são pintadas no tamanho do mundo. */
 const MUNDO = {
-  L: Math.ceil(VL / CFG.ZOOM_MIN * CFG.MUNDO_MULT),
-  A: Math.ceil(VA / CFG.ZOOM_MIN * CFG.MUNDO_MULT)
+  L: Math.ceil(REF_L / CFG.ZOOM_MIN * CFG.MUNDO_MULT),
+  A: Math.ceil(REF_A / CFG.ZOOM_MIN * CFG.MUNDO_MULT)
 };
 
 // matriz de Bayer: mistura duas cores vizinhas com pontilhado,
@@ -1198,9 +1220,17 @@ function caixa(r, corFundo, corBorda, grossura) {
 }
 
 /* ── botões (retângulos em pixels do jogo; o toque tem folga extra) ── */
+/* Abaixo do JOGAR ainda vêm os oponentes e os dois botões de ícone: 104 px
+   de pilha. Em tela baixa (monitor largo) 60% da altura jogava tudo isso para
+   fora, então o bloco sobe o quanto for preciso para caber. */
+const PILHA_MENU = 104;
+/* Largura máxima do miolo de texto. Sem ela, no monitor de 1920 o placar
+   final ficava esparramado de beira a beira. */
+const COLUNA = 240;
 function botaoJogar() {
   const l = 90, a = 22;
-  return { x: Math.round((VL - l) / 2), y: Math.round(VA * 0.60), l: l, a: a };
+  const y = Math.min(Math.round(VA * 0.60), VA - PILHA_MENU);
+  return { x: Math.round((VL - l) / 2), y: Math.max(Math.round(VA * 0.3), y), l: l, a: a };
 }
 // meio do topo: os contadores ficam nos dois cantos e o X não briga com
 // nenhum deles
@@ -1306,7 +1336,9 @@ function limites() {
 /* quantas estrelas o campo deve ter para a densidade não mudar */
 function alvoEstrelas() {
   if (!CFG.DENSIDADE_FIXA) return CFG.ESTRELAS;
-  const base = (VL * CFG.MUNDO_MULT) * (VA * CFG.MUNDO_MULT);
+  // pela tela de referência: assim a DENSIDADE é a mesma em toda plataforma,
+  // e quem tem tela maior vê mais estrelas porque enxerga mais campo
+  const base = (REF_L * CFG.MUNDO_MULT) * (REF_A * CFG.MUNDO_MULT);
   const agora = limites().l * limites().a;
   return Math.round(CFG.ESTRELAS * agora / base);
 }
@@ -1599,6 +1631,9 @@ const toque = { ativo: false, ax: 0, ay: 0, x: 0, y: 0, id: null,
                 ang: null, volta: 0, sentido: 0, acum: 0, parado: 0, girando: false };
 let espiral = 0;          // 0 a 1: o quanto o gesto de espiral está valendo
 const teclas = Object.create(null);
+/* mouse de verdade (não é dedo): é o sinal de que dá para mostrar as teclas */
+const PONTEIRO_FINO = window.matchMedia &&
+                      window.matchMedia("(pointer: fine)").matches;
 
 function zerarGesto() {
   toque.ang = null; toque.acum = 0; toque.parado = 0;
@@ -2164,13 +2199,24 @@ function passo() {
   if (cena === "menu") {
     // no menu ele fica parado, esperando: só o disco de acreção gira
     buraco.vx = buraco.vy = 0;
+    /* e espera ACIMA do botão. O centro da tela é onde ele nasce, mas em tela
+       deitada esse centro cai bem em cima do JOGAR e o rosto ficava atrás da
+       caixa. Em tela em pé a conta não muda nada: o botão está bem abaixo. */
+    const alvoY = Math.min(VA / 2, botaoJogar().y - raioTela - 10);
+    cam.x = buraco.x - VL / 2;
+    cam.y = buraco.y - Math.max(raioTela + 4, alvoY);
   } else {
     if (toque.ativo) {
       const dx = toque.x - toque.ax, dy = toque.y - toque.ay;
       if (Math.hypot(dx, dy) > CFG.ZONA_MORTA) buraco.ang = Math.atan2(dy, dx);
       acelerando = true;
     }
-    lerEspiral();
+    /* No teclado não há como rodar o dedo: segurar shift ou espaço faz as
+       vezes do gesto de espiral. Tem de ser um DESVIO de lerEspiral(), e não
+       um acréscimo depois dela: sem dedo na tela ela zera `espiral` todo
+       quadro, então somar por cima só rendia o valor de um quadro só. */
+    if (teclas.Shift || teclas[" "]) espiral = Math.min(1, espiral + 0.14);
+    else lerEspiral();
     // rodando o dedo, ele não sai andando: o gesto vira rotação, não empurrão.
     // Sem isso o buraco descreveria círculos junto com o dedo e o modo sucção
     // ficaria impossível de usar parado, que é o ponto dele
@@ -4129,22 +4175,34 @@ function desenharFim() {
               ganhou ? COR.hud : palV.disco[6], 2);
   textoCentro("chegou a " + CFG.META + " estrelas", topo + 20, COR.hudFraco, 1);
 
-  // placar de todo mundo, do maior para o menor
+  /* Em tela DEITADA o placar e o gráfico ficam lado a lado. Empilhados eles
+     não cabiam na altura (o gráfico simplesmente sumia) e, pior, o nome ia
+     para a beira esquerda e o número para a beira direita, com um vão de tela
+     inteira no meio — dois dados que se leem juntos não podem ficar a meio
+     metro um do outro no monitor. */
+  const larguraCol = Math.min(VL - 24, COLUNA);
+  const colX = Math.round((VL - larguraCol) / 2);
+  const emColunas = VL >= 300 && VA < 300;
+  const placarL = emColunas ? Math.round(larguraCol * 0.42) : larguraCol;
+
   const ordem = todos().slice().sort((a, b) => b.comidas - a.comidas);
   let y0 = topo + 38;
   for (const p of ordem) {
     const eu = p === buraco;
     const cor = eu ? COR.hud : paletaDe(p).disco[6];
-    texto(eu ? "voce" : "rival " + (p.indice + 1), 18, y0, cor, 1);
+    texto(eu ? "voce" : "rival " + (p.indice + 1), colX, y0, cor, 1);
     const e1 = "" + p.comidas;
-    texto(e1, VL - 18 - larguraTexto(e1, 1), y0, cor, 1);
+    texto(e1, colX + placarL - larguraTexto(e1, 1), y0, cor, 1);
     y0 += 12;
   }
 
   /* desempenho ao longo da partida */
-  const gx = 18, gl = VL - 36;
-  const gy = y0 + 12, ga = Math.max(40, botaoJogar().y - gy - 14);
-  desenharGrafico(gx, gy, gl, ga);
+  const gx = emColunas ? colX + placarL + 14 : colX;
+  const gl = emColunas ? larguraCol - placarL - 14 : larguraCol;
+  const gy = emColunas ? topo + 38 : y0 + 12;
+  const ga = botaoJogar().y - gy - 14;
+  // se nem assim couber, melhor não desenhar do que desenhar por cima do botão
+  if (ga >= 26) desenharGrafico(gx, gy, gl, ga);
 
   const b = comprimir(botaoJogar(), "jogar");
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
@@ -4290,6 +4348,7 @@ function desenharMenu() {
   textoCentro("devoradores de estrelas",
               topo + FONTE_H * tamNome + 6, COR.disco[4], 1);
 
+
   /* quantos oponentes */
   const rot = "oponentes";
   texto(rot, Math.round((VL - larguraTexto(rot, 1)) / 2),
@@ -4310,7 +4369,8 @@ function desenharMenu() {
   /* som e fundo, lado a lado. Cada um na sua caixa: os bonecos passeiam pelo
      menu e passavam bem por baixo dos ícones soltos. Quem está LIGADO fica
      com o contorno aceso; quem está desligado fica no traço apagado. */
-  const bs = comprimir(botaoSom(), "som");
+  const bsr = botaoSom();
+  const bs = comprimir(bsr, "som");
   caixa(bs, COR.painel, SOM.ligado ? COR.disco[4] : COR.hudFraco, 2);
   desenharIconeSom(bs.x + bs.l / 2, bs.y + bs.a / 2, SOM.ligado);
   const bf = comprimir(botaoFundo(), "fundo");
@@ -4318,6 +4378,14 @@ function desenharMenu() {
   // o contorno fica sempre aceso — quem diz o que vai acontecer é o ícone
   caixa(bf, COR.painel, COR.disco[4], 2);
   desenharIconeFundo(bf.x + bf.l / 2, bf.y + bf.a / 2, CFG.FUNDO_PB);
+
+  /* Quem chega de mouse não tem como adivinhar o gesto de espiral: no toque
+     ele se descobre rodando o dedo, no teclado não há dedo para rodar. Vai no
+     rodapé porque é lá que sobra espaço nas duas orientações — embaixo do
+     título ele batia no boneco que fica esperando no meio da tela. */
+  const rodape = bsr.y + bsr.a + 9;
+  if (PONTEIRO_FINO && rodape + FONTE_H <= VA)
+    textoCentro("wasd mover   -   shift sugar", rodape, COR.hudFraco, 1);
 
   const b = comprimir(botaoJogar(), "jogar");
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
