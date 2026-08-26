@@ -1262,7 +1262,7 @@ function caixa(r, corFundo, corBorda, grossura) {
 /* Abaixo do JOGAR ainda vêm os oponentes e os dois botões de ícone: 104 px
    de pilha. Em tela baixa (monitor largo) 60% da altura jogava tudo isso para
    fora, então o bloco sobe o quanto for preciso para caber. */
-const PILHA_MENU = 104;
+const PILHA_MENU = 124;
 /* Largura máxima do miolo de texto. Sem ela, no monitor de 1920 o placar
    final ficava esparramado de beira a beira. */
 const COLUNA = 240;
@@ -1301,7 +1301,13 @@ const rnd = semente(CFG.SEMENTE + 4242);
 
 let cena = "menu";                 // "menu" | "jogo"
 const buraco = { x: 0, y: 0, vx: 0, vy: 0, ang: -Math.PI / 2,
-                 nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0, atordoado: 0 };
+                 nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0, atordoado: 0,
+                 /* `slot` é a cadeira na partida: 0 é a cor do jogador, 1 a 3 são
+                    as cores de rival. No jogo solo o dono da cadeira 0 é sempre
+                    este `buraco`; no online cada um senta numa cadeira diferente,
+                    e é o slot — não a variável — que decide a cor. Assim todo
+                    mundo vê o mesmo boneco da mesma cor. */
+                 slot: 0, humano: true };
 
 /* Os rivais: mesmo bicho, cérebro simples, uma cor cada. São criados uma vez
    só, no máximo possível, e `rivais` aponta para os que estão em campo — assim
@@ -1311,12 +1317,17 @@ const TODOS_RIVAIS = [];
 for (let i = 0; i < CFG.RIVAIS_MAX; i++)
   TODOS_RIVAIS.push({ x: 0, y: 0, vx: 0, vy: 0, ang: 0, indice: i,
                       nivel: 0, progresso: 0, comidas: 0, pulso: 0, boca: 0,
-                      atordoado: 0, alvo: null, pensar: 0 });
+                      atordoado: 0, alvo: null, pensar: 0,
+                      slot: i + 1, humano: false, espiral: 0, turbo: 0, ima: 0 });
 let rivais = [TODOS_RIVAIS[0]];
 const rival = TODOS_RIVAIS[0];      // atalho para o primeiro, que sempre existe
 /* todo mundo em campo, para os laços que valem para os dois lados */
 const todos = () => [buraco].concat(rivais);
-const paletaDe = r => COR.rivais[r.indice % COR.rivais.length];
+/* A cor sai do SLOT e não de quem é o objeto: no online o mesmo jogador é
+   `buraco` na tela dele e um rival na tela dos outros, e sem isso cada um
+   veria uma cor diferente para o mesmo boneco. Fora do online a conta dá
+   exatamente o que dava antes (slot = indice + 1). */
+const paletaDe = p => p.slot ? COR.rivais[(p.slot - 1) % COR.rivais.length] : COR;
 let vencedor = null;
 let estrelas = [], faiscas = [], coracoes = [], aneis = [], terra = null, esperaTerra = 0, turbo = 0;
 let marte = null, esperaMarte = 0, ima = 0, flashIma = 0;
@@ -1365,7 +1376,12 @@ const visaoL = () => VL / zoom;
 const visaoA = () => VA / zoom;
 
 /* a área jogável é um retângulo centrado que abre conforme o zoom sai */
+/* No online a arena é a que o ANFITRIÃO calculou e mandou: ela cresce com o
+   zoom e com o tamanho da tela, e sem um valor só para todos cada um jogaria
+   num campo de tamanho diferente — as bordas não bateriam. */
+let limitesRede = null;
 function limites() {
+  if (limitesRede) return limitesRede;
   const l = Math.min(MUNDO.L, visaoL() * CFG.MUNDO_MULT);
   const a = Math.min(MUNDO.A, visaoA() * CFG.MUNDO_MULT);
   return { x0: (MUNDO.L - l) / 2, y0: (MUNDO.A - a) / 2,
@@ -1504,6 +1520,7 @@ function reiniciar() {
     r.alvo = null; r.pensar = 0; r.enjoo = 0; r.surpresa = 0; r.fervor = 0;
     r.presa = null; r.perseguindo = 0; r.elast = 0; r.elastV = 0;
     r.tiro = 0; r.recargaTiro = 0; r.dreno = 0; r.ritmoDreno = 0; r.imune = 0;
+    r.espiral = 0; r.turbo = 0; r.ima = 0;
     // espalhados em leque à mesma distância: ninguém começa com vantagem
     const a = -Math.PI / 2 + (i + 1) / (rivais.length + 1) * Math.PI * 2;
     r.ang = a + Math.PI;
@@ -1684,8 +1701,15 @@ function zerarGesto() {
 }
 /* o gesto é zerado aqui e não em reiniciar(): reiniciar roda na abertura,
    antes de `espiral` e `toque` existirem, e tocar neles ali dá erro */
-function jogar() { reiniciar(); zerarGesto(); cena = "jogo"; }
+function jogar() { slotsOffline(); reiniciar(); zerarGesto(); cena = "jogo"; }
+/* de novo, na mesma sala: quem manda recomeçar é sempre o anfitrião, senão
+   dois cliques ao mesmo tempo dariam duas partidas diferentes */
+function rejogar() {
+  if (!REDE.ativa) { jogar(); return; }
+  if (REDE.anfitriao) mandar({ t: "ir" });
+}
 function sair()  { toque.ativo = false; toque.id = null;
+                   if (REDE.ativa || REDE.codigo) largarSala();
                    cena = "menu"; reiniciar(); zerarGesto(); }
 
 tela.addEventListener("pointerdown", e => {
@@ -1715,11 +1739,20 @@ tela.addEventListener("pointerdown", e => {
       apertar("fundo", () => aplicarFundo(!CFG.FUNDO_PB));
       return;
     }
+    if (dentro(gx, gy, botaoOnline(), 6)) {
+      SFX.clique();
+      apertar("online", () => { REDE.erro = ""; cena = "online"; });
+      return;
+    }
     if (dentro(gx, gy, botaoJogar(), 6)) { SFX.clique(); apertar("jogar", jogar); }
     return;
   }
+  if (cena === "online" || cena === "codigo" || cena === "sala") {
+    toqueOnline(gx, gy);
+    return;
+  }
   if (cena === "fim") {
-    if (dentro(gx, gy, botaoJogar(), 6)) { SFX.clique(); apertar("jogar", jogar); }
+    if (dentro(gx, gy, botaoJogar(), 6)) { SFX.clique(); apertar("jogar", rejogar); }
     else if (dentro(gx, gy, botaoSair(), 8)) { SFX.clique(); apertar("sair", sair); }
     return;
   }
@@ -1754,7 +1787,26 @@ for (const ev of ["pointerup", "pointercancel"])
 window.addEventListener("keydown", e => {
   iniciarSom();
   teclas[e.key] = true;
-  if ((cena === "menu" || cena === "fim") && (e.key === "Enter" || e.key === " ")) jogar();
+  /* no teclado do computador o código se digita direto: obrigar a clicar
+     letra por letra num teclado desenhado seria perder tempo à toa */
+  if (cena === "codigo") {
+    if (e.key === "Backspace") REDE.digitado = REDE.digitado.slice(0, -1);
+    else if (e.key === "Escape") { REDE.erro = ""; cena = "online"; }
+    else if (e.key.length === 1 && LETRAS_SALA.indexOf(e.key.toUpperCase()) >= 0)
+      digitar(e.key.toUpperCase());
+    return;
+  }
+  if (cena === "sala") {
+    if (e.key === "Escape") sair();
+    else if ((e.key === "Enter" || e.key === " ") && REDE.anfitriao) mandar({ t: "ir" });
+    return;
+  }
+  if (cena === "online") {
+    if (e.key === "Escape") sair();
+    return;
+  }
+  if (cena === "menu" && (e.key === "Enter" || e.key === " ")) jogar();
+  else if (cena === "fim" && (e.key === "Enter" || e.key === " ")) rejogar();
   else if (e.key === "Escape") sair();
 });
 window.addEventListener("keyup", e => { teclas[e.key] = false; });
@@ -2270,21 +2322,48 @@ function passo() {
   quadro++;
   if (cena === "fim") {           // congela a partida, deixa a festa correr
     passoParticulas();
+    // o convidado precisa saber quem ganhou, e o retrato é quem conta:
+    // mais devagar, que aqui não há nada se mexendo além da festa
+    if (REDE.anfitriao && REDE.ativa && quadro % 6 === 0) enviarRetrato();
     return;
   }
 
+  /* No online quem simula é o anfitrião; o convidado tem um passo próprio,
+     que prevê o boneco dele e interpola o resto do que chega pela rede. */
+  if (REDE.convidado() && cena === "jogo") { passoConvidado(); return; }
+
   /* — direção — */
   let acelerando = false, freando = false;
-  if (cena === "menu") {
+  // as telas de online e de sala também são "espera": o boneco fica posando
+  if (cena !== "jogo") {
     // no menu ele fica parado, esperando: só o disco de acreção gira
     buraco.vx = buraco.vy = 0;
     /* e espera ACIMA do botão. O centro da tela é onde ele nasce, mas em tela
        deitada esse centro cai bem em cima do JOGAR e o rosto ficava atrás da
        caixa. Em tela em pé a conta não muda nada: o botão está bem abaixo. */
-    const alvoY = Math.min(VA / 2, botaoJogar().y - raioTela - 10);
+    /* Nas telas de online ele sai de cena: o teclado do código e a lista da
+       sala ocupam o meio da tela, e o boneco aparecia POR TRÁS das caixas,
+       espiando entre as teclas. Aqui ele é enfeite, e enfeite não disputa
+       espaço com o que precisa ser lido. */
+    const alvoY = cena === "menu"
+      ? Math.min(VA / 2, botaoJogar().y - raioTela - 10)
+      : VA + raioTela + 20;
     cam.x = buraco.x - VL / 2;
     cam.y = buraco.y - Math.max(raioTela + 4, alvoY);
   } else {
+    // o mesmo bloco serve ao convidado de uma partida online, que roda um
+    // passo próprio: por isso ele mora numa função só, lá embaixo
+    const c = lerComandos();
+    acelerando = c.acelerando; freando = c.freando;
+  }
+  passoJogadorFim(acelerando, freando);
+}
+
+/* os comandos do jogador local: dedo, teclado e o gesto de espiral.
+   Mexe em `buraco.ang` e em `espiral`, e devolve o que o movimento precisa. */
+function lerComandos() {
+  let acelerando = false, freando = false;
+  {
     if (toque.ativo) {
       const dx = toque.x - toque.ax, dy = toque.y - toque.ay;
       if (Math.hypot(dx, dy) > CFG.ZONA_MORTA) buraco.ang = Math.atan2(dy, dx);
@@ -2327,7 +2406,11 @@ function passo() {
     //   o freio antes delas dava para sair andando a 40% da velocidade com a
     //   tecla de sucção apertada — exatamente o passeio que era para acabar
   }
+  return { acelerando: acelerando, freando: freando };
+}
 
+/* o resto do quadro do jogador local, e depois o mundo inteiro */
+function passoJogadorFim(acelerando, freando) {
   /* — movimento: tudo é pensado em pixels de tela e convertido pelo zoom,
        para a sensação de velocidade não mudar quando a câmera se afasta — */
   // depois da pancada ele fica um tempo sem comando e sem teto de velocidade:
@@ -2353,7 +2436,9 @@ function passo() {
   if (buraco.x > L.x1 - m) { buraco.x = L.x1 - m; buraco.vx *= -0.35; }
   if (buraco.y > L.y1 - m) { buraco.y = L.y1 - m; buraco.vy *= -0.35; }
 
-  for (const r of rivais) passoRival(r, L);
+  buraco.espiral = espiral; buraco.turbo = turbo; buraco.ima = ima;
+  // quem tem gente do outro lado da rede não pensa sozinho: obedece
+  for (const r of rivais) r.humano ? passoHumano(r, L) : passoRival(r, L);
   passoTrombadas();
   passoCadente(L);
   passoCometa(L);
@@ -2389,8 +2474,14 @@ function passo() {
   sugadores[0].alc = sugadores[0].rm * CFG.ALCANCE_SUCCAO *
                      (ima > 0 ? CFG.MARTE_ALCANCE : 1) *
                      (1 + espiral * CFG.ESPIRAL_ALCANCE);
-  for (let k = 1; k < sugadores.length; k++)
-    sugadores[k].alc = sugadores[k].rm * CFG.ALCANCE_SUCCAO;
+  // os outros: a CPU tem espiral e ímã zerados, então a conta dá o de sempre;
+  // um humano na rede leva os mesmos dois bônus que o jogador local
+  for (let k = 1; k < sugadores.length; k++) {
+    const q = sugadores[k].quem;
+    sugadores[k].alc = sugadores[k].rm * CFG.ALCANCE_SUCCAO *
+                       (q.ima > 0 ? CFG.MARTE_ALCANCE : 1) *
+                       (1 + (q.espiral || 0) * CFG.ESPIRAL_ALCANCE);
+  }
 
   for (let i = estrelas.length - 1; i >= 0; i--) {
     const e = estrelas[i];
@@ -2407,7 +2498,8 @@ function passo() {
       e.presa = true;
       e.sx = dono.x; e.sy = dono.y; e.salc = dono.alc;
       const dx = dono.x - e.x, dy = dono.y - e.y, d = dDono;
-      let puxao = dono.quem === buraco && ima > 0 ? CFG.MARTE_FORCA : 1;
+      let puxao = (dono.quem === buraco ? ima : dono.quem.ima) > 0
+                  ? CFG.MARTE_FORCA : 1;
       if (dono.quem === buraco) puxao *= 1 + espiral * CFG.ESPIRAL_FORCA;
       const forca = (CFG.FORCA_SUCCAO * puxao * (1 - melhor) + 0.02) / zoom;
       e.vx += (dx / d) * forca; e.vy += (dy / d) * forca;
@@ -2580,6 +2672,10 @@ function passo() {
   cam.y += (alvoY - cam.y) * 0.12;
   cam.x = limitar(cam.x, 0, MUNDO.L - visaoL());
   cam.y = limitar(cam.y, 0, MUNDO.A - visaoA());
+
+  // 20 retratos por segundo: de 3 em 3 quadros. Mais que isso é banda jogada
+  // fora — a interpolação do outro lado cobre o vão sem ninguém notar
+  if (REDE.anfitriao && REDE.ativa && quadro % 3 === 0) enviarRetrato();
 }
 
 function passoParticulas() {
@@ -2826,7 +2922,10 @@ function engolirTerra(dono) {
   esperaTerra = CFG.TERRA_ESPERA;
   if (cena !== "jogo") return;
   dono.pulso = 1; dono.boca = 20;
-  if (dono !== buraco) return;                  // o rival só engole, não turbina
+  /* A CPU só engole, não turbina — é o handicap dela desde sempre. Gente de
+     carne e osso do outro lado da rede turbina igual, senão o anfitrião teria
+     um poder que os convidados não têm. */
+  if (dono !== buraco) { if (dono.humano) dono.turbo = CFG.TERRA_TURBO; return; }
   turbo = CFG.TERRA_TURBO;
   anunciar("SPEED UP", COR.turbo);
   tremor = 10;
@@ -2844,7 +2943,7 @@ function engolirMarte(dono) {
   esperaMarte = CFG.MARTE_ESPERA;
   if (cena !== "jogo") return;
   dono.pulso = 1; dono.boca = 20;
-  if (dono !== buraco) return;                  // o rival só engole, como na Terra
+  if (dono !== buraco) { if (dono.humano) dono.ima = CFG.MARTE_IMA; return; }
   ima = CFG.MARTE_IMA;
   anunciar("MAGNETIC!", COR.ima);
   tremor = 10;
@@ -4309,7 +4408,11 @@ function desenharFim() {
   for (const p of ordem) {
     const eu = p === buraco;
     const cor = eu ? COR.hud : paletaDe(p).disco[6];
-    texto(eu ? "voce" : "rival " + (p.indice + 1), colX, y0, cor, 1);
+    // no online o rótulo é a cadeira, e não "rival 1": todo mundo vê o mesmo
+    // número para a mesma pessoa, que é o que faz a conversa depois da partida
+    const rot = eu ? "voce" : REDE.ativa ? "jogador " + (p.slot + 1)
+                                         : "rival " + (p.indice + 1);
+    texto(rot, colX, y0, cor, 1);
     const e1 = "" + p.comidas;
     texto(e1, colX + placarL - larguraTexto(e1, 1), y0, cor, 1);
     y0 += 12;
@@ -4323,11 +4426,20 @@ function desenharFim() {
   // se nem assim couber, melhor não desenhar do que desenhar por cima do botão
   if (ga >= 26) desenharGrafico(gx, gy, gl, ga);
 
-  const b = comprimir(botaoJogar(), "jogar");
-  const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
-  caixa(b, COR.painel, pulso > 0.5 ? COR.disco[4] : COR.disco[3], 2);
-  texto("de novo", b.x + Math.round((b.l - larguraTexto("de novo", 2)) / 2),
-        b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
+  /* Numa sala online quem recomeça é o anfitrião — os outros esperam. O
+     botão vira aviso em vez de sumir: espaço vazio no lugar dele daria a
+     impressão de que a partida travou. */
+  if (REDE.ativa && !REDE.anfitriao) {
+    const pontos = ".".repeat(1 + Math.floor(quadro / 30) % 3);
+    textoCentro("esperando o anfitriao" + pontos,
+                botaoJogar().y + 7, COR.hudFraco, 1);
+  } else {
+    const b = comprimir(botaoJogar(), "jogar");
+    const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
+    caixa(b, COR.painel, pulso > 0.5 ? COR.disco[4] : COR.disco[3], 2);
+    texto("de novo", b.x + Math.round((b.l - larguraTexto("de novo", 2)) / 2),
+          b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
+  }
 
   desenharBotaoSair();
 }
@@ -4337,10 +4449,10 @@ function botaoOponente(i) {
   const l = 20, esp = 6;
   const total = CFG.RIVAIS_MAX * l + (CFG.RIVAIS_MAX - 1) * esp;
   const x0 = Math.round((VL - total) / 2);
-  const b = botaoJogar();
-  // abaixo do JOGAR: acima, a linha batia bem em cima do personagem que
-  // fica esperando no meio da tela
-  return { x: x0 + i * (l + esp), y: b.y + b.a + 16, l: l, a: 18 };
+  const b = botaoOnline();          // logo abaixo do par JOGAR / ONLINE
+  // acima deles a linha batia bem em cima do personagem que fica esperando
+  // no meio da tela
+  return { x: x0 + i * (l + esp), y: b.y + b.a + 12, l: l, a: 18 };
 }
 
 /* Som e fundo: dois botões de verdade, com caixa e contorno próprios. Antes
@@ -4511,6 +4623,13 @@ function desenharMenu() {
   caixa(b, COR.painel, pulso > 0.5 ? COR.disco[5] : COR.disco[4], 2);
   texto("JOGAR", b.x + Math.round((b.l - larguraTexto("JOGAR", 2)) / 2),
         b.y + Math.round((b.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
+
+  /* ONLINE, logo abaixo e mais discreto: o caminho de sempre é o de cima, e
+     este é o desvio de quem vai chamar alguém */
+  const bo2 = comprimir(botaoOnline(), "online");
+  caixa(bo2, COR.painel, COR.disco[4], 2);
+  texto("ONLINE", bo2.x + Math.round((bo2.l - larguraTexto("ONLINE", 1)) / 2),
+        bo2.y + Math.round((bo2.a - FONTE_H) / 2), COR.hud, 1);
 }
 
 function desenharAnalogico() {
@@ -4698,6 +4817,584 @@ function aberracao() {
   ctx.globalCompositeOperation = "source-over";
 }
 
+/* ── online: salas de quatro letras ───────────────────────────
+   COMO FUNCIONA. Quem cria a sala é o ANFITRIÃO, e o navegador dele é o dono
+   da verdade: roda a partida inteira, exatamente a mesma que roda no jogo
+   solo. Os convidados mandam só o comando ("estou apontando para lá,
+   acelerando, sugando") e recebem 20 retratos do mundo por segundo. O
+   servidor não sabe nada do jogo — ele guarda a lista de salas e repassa
+   mensagem. Foi de propósito: uma segunda cópia das regras num servidor seria
+   uma segunda cópia para manter em dia, e as regras são o arquivo inteiro.
+
+   O convidado não fica esperando o retrato para mexer. Ele PREVÊ o próprio
+   boneco com a mesma conta do anfitrião, no quadro em que o dedo mexe, e
+   depois corrige devagar para onde o retrato disse. Sem isso todo comando
+   teria a ida e a volta da rede de atraso e o jogo ficaria borrachudo.
+
+   Cada jogador tem uma CADEIRA (slot) de 0 a 3, e a cor vem da cadeira. O
+   mesmo boneco é `buraco` na tela do dono e um rival na tela dos outros: sem
+   a cadeira, cada um veria uma cor diferente para a mesma pessoa. */
+const REDE = {
+  ws: null, ligando: false, erro: "", codigo: "", digitado: "",
+  slot: 0, anfitriao: false, quantos: 1, cpus: 1, humanos: 1, vivos: [1],
+  ativa: false,        // partida online em andamento
+  entradas: [],        // anfitrião: último comando recebido de cada cadeira
+  corrX: undefined, corrY: undefined,
+  convidado: function () { return this.ativa && !this.anfitriao; }
+};
+
+function ligarRede(depois) {
+  if (REDE.ws && REDE.ws.readyState === 1) { depois(); return; }
+  if (location.protocol === "file:") {
+    REDE.erro = "ABRA PELO SERVIDOR"; return;
+  }
+  REDE.ligando = true; REDE.erro = "";
+  let ws;
+  try {
+    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") +
+                       location.host + "/ws");
+  } catch (e) { REDE.ligando = false; REDE.erro = "SEM CONEXAO"; return; }
+  REDE.ws = ws;
+  ws.onopen = () => { REDE.ligando = false; depois(); };
+  ws.onmessage = ev => { try { receber(JSON.parse(ev.data)); } catch (e) {} };
+  ws.onerror = () => { REDE.ligando = false; REDE.erro = "SEM CONEXAO"; };
+  ws.onclose = () => {
+    REDE.ligando = false; REDE.ws = null;
+    if (REDE.ativa || cena === "sala") quedaDeRede("CONEXAO PERDIDA");
+  };
+}
+function mandar(o) {
+  if (REDE.ws && REDE.ws.readyState === 1) REDE.ws.send(JSON.stringify(o));
+}
+
+function largarSala() {
+  mandar({ t: "tchau" });
+  REDE.ativa = false; REDE.anfitriao = false; REDE.codigo = "";
+  REDE.corrX = REDE.corrY = undefined;
+  limitesRede = null; slotsOffline();
+}
+function quedaDeRede(msg) {
+  REDE.ativa = false; REDE.anfitriao = false; REDE.codigo = "";
+  REDE.corrX = REDE.corrY = undefined;
+  limitesRede = null; slotsOffline();
+  REDE.erro = msg || ""; REDE.digitado = "";
+  cena = "online"; reiniciar(); zerarGesto();
+}
+
+/* as cadeiras do jogo solo: o jogador na 0 e cada rival na seguinte —
+   é o mesmo que a lista de rivais já dava antes de existir o online */
+function slotsOffline() {
+  buraco.slot = 0; buraco.humano = true;
+  for (let i = 0; i < TODOS_RIVAIS.length; i++) {
+    TODOS_RIVAIS[i].slot = i + 1; TODOS_RIVAIS[i].humano = false;
+    TODOS_RIVAIS[i].espiral = 0; TODOS_RIVAIS[i].turbo = 0; TODOS_RIVAIS[i].ima = 0;
+  }
+}
+/* eu sento na minha cadeira e os rivais em campo ficam com as que sobraram,
+   em ordem: assim a cadeira 2 é o mesmo boneco na tela de todo mundo */
+function marcarSlots() {
+  buraco.slot = REDE.slot; buraco.humano = true;
+  const fora = [];
+  for (let s = 0; s <= rivais.length; s++) if (s !== REDE.slot) fora.push(s);
+  for (let i = 0; i < rivais.length; i++) {
+    rivais[i].slot = fora[i];
+    // quem largou a partida no meio vira CPU: o boneco continua em campo
+    rivais[i].humano = fora[i] < REDE.humanos && REDE.vivos[fora[i]] !== 0;
+  }
+}
+
+function receber(m) {
+  if (m.t === "sala") {
+    REDE.codigo = m.codigo; REDE.slot = m.slot; REDE.anfitriao = m.anfitriao;
+    REDE.quantos = m.quantos; REDE.cpus = m.cpus; REDE.vivos = m.vivos;
+    REDE.erro = ""; REDE.digitado = "";
+    if (REDE.ativa) { REDE.humanos = m.quantos; marcarSlots(); }
+    else if (cena !== "sala") { cena = "sala"; SFX.clique(); }
+  } else if (m.t === "erro") {
+    REDE.erro = m.msg; REDE.digitado = ""; cena = "codigo";
+  } else if (m.t === "ir") {
+    comecarOnline(m);
+  } else if (m.t === "menu") {
+    REDE.ativa = false; limitesRede = null; cena = "sala"; reiniciar();
+  } else if (m.t === "acabou") {
+    quedaDeRede("SALA ENCERRADA");
+  } else if (m.t === "e") {
+    aplicarRetrato(m);
+  } else if (m.t === "i") {
+    REDE.entradas[m.slot] = m;
+  }
+}
+
+function comecarOnline(m) {
+  REDE.humanos = m.quantos; REDE.cpus = m.cpus; REDE.ativa = true;
+  REDE.entradas = []; REDE.corrX = REDE.corrY = undefined;
+  limitesRede = null;
+  CFG.RIVAIS = limitar(m.quantos - 1 + m.cpus, 1, CFG.RIVAIS_MAX);
+  gerarCamadas();               // a nebulosa ganha a cor de cada participante
+  reiniciar();
+  marcarSlots();
+  zerarGesto(); cena = "jogo";
+}
+
+/* ── o anfitrião move os bonecos de carne e osso ─────────────── */
+/* mesma física do jogador local, com o comando vindo da rede em vez do dedo.
+   Sem o desconto de força da CPU: do outro lado tem gente, não cérebro
+   simples, e tirar velocidade dela seria roubar. */
+function passoHumano(p, L) {
+  const rm = raioMundoNivel(p.nivel), zr = zoomDoNivel(p.nivel);
+  const e = REDE.entradas[p.slot];
+  let acelerando = false;
+  if (e) { p.ang = e.a / 100; acelerando = !!e.c; p.espiral = e.s / 100; }
+  else p.espiral = 0;
+
+  let freando = false;
+  if (p.espiral > 0.15) {                     // sucção só de pé firme, igual
+    acelerando = false; freando = true;
+    if (Math.hypot(p.vx, p.vy) * zr > CFG.SUCCAO_PARADO) p.espiral = 0;
+  }
+  const zonzo = p.atordoado > 0;
+  if (zonzo) { p.atordoado--; acelerando = false; }
+  if (p.turbo > 0) p.turbo--;
+  if (p.ima > 0) p.ima--;
+
+  const fator = (p.turbo > 0 ? CFG.TERRA_FATOR : 1) *
+                (p.enjoo > 0 ? CFG.COMETA_FREIO : 1);
+  const acel = (acelerando ? CFG.ACEL * fator : 0) / zr;
+  const atrito = zonzo ? CFG.COLISAO_ARRASTO
+               : freando ? CFG.SUCCAO_FREIO : CFG.ATRITO;
+  p.vx = (p.vx + Math.cos(p.ang) * acel) * atrito;
+  p.vy = (p.vy + Math.sin(p.ang) * acel) * atrito;
+  const vm = Math.max(0.9, CFG.VEL_MAX - p.nivel * CFG.VEL_PERDA) * fator / zr;
+  const v = Math.hypot(p.vx, p.vy);
+  if (!zonzo && v > vm) { p.vx = p.vx / v * vm; p.vy = p.vy / v * vm; }
+  p.x += p.vx; p.y += p.vy;
+
+  const mg = rm + 1;
+  if (p.x < L.x0 + mg) { p.x = L.x0 + mg; p.vx *= -0.35; }
+  if (p.y < L.y0 + mg) { p.y = L.y0 + mg; p.vy *= -0.35; }
+  if (p.x > L.x1 - mg) { p.x = L.x1 - mg; p.vx *= -0.35; }
+  if (p.y > L.y1 - mg) { p.y = L.y1 - mg; p.vy *= -0.35; }
+}
+
+/* ── o retrato do mundo, 20 vezes por segundo ─────────────────── */
+/* tudo em décimos de pixel e número inteiro: o JSON de uma partida de quatro
+   com o campo cheio fica em torno de 1 KB, ou 20 KB/s por convidado */
+const dez = v => Math.round(v * 10);
+function enviarRetrato() {
+  const L = limites();
+  const j = [];
+  for (const p of todos()) {
+    const eu = p === buraco;
+    j[p.slot] = [dez(p.x), dez(p.y), Math.round(p.ang * 100), p.nivel, p.comidas,
+      Math.round(p.progresso * 100), Math.round(p.boca), Math.round(p.pulso * 100),
+      p.atordoado | 0, p.enjoo | 0, p.imune | 0,
+      Math.round((eu ? espiral : p.espiral || 0) * 100),
+      (eu ? turbo : p.turbo) | 0, (eu ? ima : p.ima) | 0,
+      p.tiro | 0, p.dreno | 0, p.surpresa | 0];
+  }
+  const obj = o => o ? [dez(o.x), dez(o.y)] : 0;
+  const s = [];
+  for (const e of estrelas) s.push(dez(e.x), dez(e.y), e.presa ? 1 : 0);
+  const b = [];
+  for (const g of blocos)
+    b.push(dez(g.x), dez(g.y), dez(g.vx), dez(g.vy), Math.round(g.giro * 10));
+  const r = [];
+  for (const e of roubadas) r.push(dez(e.x), dez(e.y), Math.round(e.giro * 10));
+  mandar({ t: "e", j: j, s: s, b: b, r: r,
+    L: [dez(L.x0), dez(L.y0), dez(L.x1), dez(L.y1)],
+    o: [obj(terra), obj(marte), obj(saturno), obj(jupiter), obj(netuno)],
+    c: cometa ? [dez(cometa.x), dez(cometa.y), dez(cometa.vx), dez(cometa.vy)] : 0,
+    d: cadente ? [dez(cadente.x), dez(cadente.y), dez(cadente.vx), dez(cadente.vy)] : 0,
+    w: vencedor ? vencedor.slot : -1 });
+}
+
+function aplicarRetrato(m) {
+  if (!REDE.convidado()) return;
+  const d = v => v / 10;
+  limitesRede = { x0: d(m.L[0]), y0: d(m.L[1]), x1: d(m.L[2]), y1: d(m.L[3]),
+                  l: d(m.L[2] - m.L[0]), a: d(m.L[3] - m.L[1]) };
+
+  for (const p of todos()) {
+    const v = m.j[p.slot];
+    if (!v) continue;
+    const eu = p === buraco;
+    if (eu) {
+      REDE.corrX = d(v[0]); REDE.corrY = d(v[1]);
+      if (v[3] > p.nivel) { expansao = 1; SFX.nivel(); }
+      if (v[4] < p.comidas) {          // levei pancada: a tela reage na hora
+        flashDano = Math.max(flashDano, 18);
+        tremor = Math.max(tremor, 3);
+        anotarPerda("dreno", p.comidas - v[4]);
+      }
+      turbo = v[12]; ima = v[13];
+    } else {
+      p.alvoX = d(v[0]); p.alvoY = d(v[1]); p.ang = v[2] / 100;
+      p.espiral = v[11] / 100; p.turbo = v[12]; p.ima = v[13];
+    }
+    p.nivel = v[3]; p.comidas = v[4]; p.progresso = v[5] / 100;
+    p.boca = v[6]; p.pulso = v[7] / 100; p.atordoado = v[8];
+    p.enjoo = v[9]; p.imune = v[10]; p.tiro = v[14]; p.dreno = v[15];
+    p.surpresa = v[16];
+  }
+
+  const n = m.s.length / 3;
+  while (estrelas.length > n) estrelas.pop();
+  while (estrelas.length < n)
+    estrelas.push({ x: 0, y: 0, fase: Math.random() * Math.PI * 2,
+                    ritmo: 0.05 + Math.random() * 0.07,
+                    giro: Math.random() < 0.5 ? -1 : 1,
+                    sx: 0, sy: 0, salc: 1, vx: 0, vy: 0, presa: false });
+  for (let i = 0; i < n; i++) {
+    const e = estrelas[i];
+    e.x = d(m.s[i * 3]); e.y = d(m.s[i * 3 + 1]); e.presa = !!m.s[i * 3 + 2];
+  }
+
+  const planeta = (v, ant) => v ? { x: d(v[0]), y: d(v[1]), vx: 0, vy: 0,
+                                    quadro: ant ? ant.quadro : 0 } : null;
+  terra = planeta(m.o[0], terra); marte = planeta(m.o[1], marte);
+  saturno = planeta(m.o[2], saturno); jupiter = planeta(m.o[3], jupiter);
+  netuno = planeta(m.o[4], netuno);
+
+  // o rastro é local: ele não viaja pela rede, cada tela desenha o seu
+  const voador = (v, ant) => {
+    if (!v) return null;
+    const o = ant || { rastro: [] };
+    o.x = d(v[0]); o.y = d(v[1]); o.vx = d(v[2]); o.vy = d(v[3]);
+    if (!o.rastro) o.rastro = [];
+    return o;
+  };
+  cometa = voador(m.c, cometa); cadente = voador(m.d, cadente);
+
+  const nb = m.b.length / 5;
+  blocos.length = nb;
+  for (let i = 0; i < nb; i++) {
+    const g = blocos[i] || (blocos[i] = { rastro: [], vida: 200 });
+    g.x = d(m.b[i * 5]); g.y = d(m.b[i * 5 + 1]);
+    g.vx = d(m.b[i * 5 + 2]); g.vy = d(m.b[i * 5 + 3]);
+    g.giro = m.b[i * 5 + 4] / 10;
+    if (!g.rastro) g.rastro = [];
+  }
+  const nr = m.r.length / 3;
+  roubadas.length = nr;
+  for (let i = 0; i < nr; i++) {
+    const e = roubadas[i] || (roubadas[i] = { rastro: [] });
+    e.x = d(m.r[i * 3]); e.y = d(m.r[i * 3 + 1]); e.giro = m.r[i * 3 + 2] / 10;
+    if (!e.rastro) e.rastro = [];
+  }
+  drenando = todos().some(p => p.dreno > 0);
+
+  // quem decide o fim é o anfitrião; aqui só se obedece — e a festa é a mesma
+  if (m.w >= 0 && cena === "jogo")
+    terminar(todos().find(p => p.slot === m.w) || buraco);
+}
+
+function rastrear(o) {
+  o.rastro.push({ x: o.x, y: o.y });
+  if (o.rastro.length > 18) o.rastro.shift();
+}
+
+/* ── o quadro do convidado ────────────────────────────────────── */
+function passoConvidado() {
+  const c = lerComandos();
+
+  /* PREVISÃO. A mesma conta do anfitrião, rodada aqui para o boneco andar no
+     quadro em que o dedo mexe. O que o anfitrião mandar corrige depois. */
+  const zonzo = buraco.atordoado > 0;
+  const acelerando = zonzo ? false : c.acelerando;
+  if (zonzo) buraco.atordoado--;
+  const fator = (turbo > 0 ? CFG.TERRA_FATOR : 1) *
+                (buraco.enjoo > 0 ? CFG.COMETA_FREIO : 1);
+  const acel = (acelerando ? CFG.ACEL * fator : 0) / zoom;
+  const atrito = zonzo ? CFG.COLISAO_ARRASTO
+               : c.freando ? CFG.SUCCAO_FREIO : CFG.ATRITO;
+  buraco.vx = (buraco.vx + Math.cos(buraco.ang) * acel) * atrito;
+  buraco.vy = (buraco.vy + Math.sin(buraco.ang) * acel) * atrito;
+  const v = Math.hypot(buraco.vx, buraco.vy), vm = velMaxTela() / zoom;
+  if (!zonzo && v > vm) { buraco.vx = buraco.vx / v * vm; buraco.vy = buraco.vy / v * vm; }
+  buraco.x += buraco.vx; buraco.y += buraco.vy;
+  if (turbo > 0) turbo--;
+  if (ima > 0) ima--;
+
+  /* CORREÇÃO, a 12% por quadro. De uma vez só o boneco tremeria a cada
+     retrato que chega; assim o erro some em meio segundo sem se ver o
+     conserto. Erro grande demais (levou pancada, saiu do lugar) é teleporte:
+     aí não há o que disfarçar, e arrastar por um campo inteiro seria pior. */
+  if (REDE.corrX !== undefined) {
+    if (Math.hypot(REDE.corrX - buraco.x, REDE.corrY - buraco.y) > 80) {
+      buraco.x = REDE.corrX; buraco.y = REDE.corrY;
+    } else {
+      buraco.x += (REDE.corrX - buraco.x) * 0.12;
+      buraco.y += (REDE.corrY - buraco.y) * 0.12;
+    }
+  }
+  for (const r of rivais) {
+    if (r.alvoX === undefined) continue;
+    r.x += (r.alvoX - r.x) * 0.3; r.y += (r.alvoY - r.y) * 0.3;
+  }
+
+  /* o que voa segue em frente entre um retrato e outro: parado esperando
+     pacote, o bloco de gelo andaria aos trancos de três em três quadros */
+  for (const o of [cometa, cadente]) if (o) { o.x += o.vx; o.y += o.vy; rastrear(o); }
+  for (const g of blocos) { g.x += g.vx; g.y += g.vy; g.giro += 0.25; rastrear(g); }
+  for (const e of roubadas) { e.giro += 0.2; rastrear(e); }
+  if (terra) terra.quadro++;
+  for (const e of estrelas) e.fase += e.ritmo;
+
+  const raioAlvo = CFG.RAIO_BASE + buraco.nivel * CFG.RAIO_TELA_PASSO;
+  zoomAlvo = zoomDoNivel(buraco.nivel);
+  raioTela += (raioAlvo - raioTela) * 0.08;
+  if (expansao > 0.004) {
+    expansao *= CFG.ZOOM_FREIO;
+    zoom += (zoomAlvo * (1 - expansao * CFG.ZOOM_ESTOURO) - zoom) * 0.16;
+  } else { expansao = 0; zoom += (zoomAlvo - zoom) * 0.05; }
+
+  passoParticulas();
+  passoPerdas();
+  verLideranca();
+  anotarDesempenho();
+
+  const L = limites();
+  cam.x += (limitar(buraco.x - visaoL() / 2, L.x0, L.x1 - visaoL()) - cam.x) * 0.12;
+  cam.y += (limitar(buraco.y - visaoA() / 2, L.y0, L.y1 - visaoA()) - cam.y) * 0.12;
+  cam.x = limitar(cam.x, 0, MUNDO.L - visaoL());
+  cam.y = limitar(cam.y, 0, MUNDO.A - visaoA());
+
+  // 30 comandos por segundo: o dobro da taxa de retrato, porque comando é
+  // barato (três números) e é o que decide se o jogo responde bem
+  if (quadro % 2 === 0)
+    mandar({ t: "i", a: Math.round(buraco.ang * 100),
+             c: c.acelerando ? 1 : 0, s: Math.round(espiral * 100) });
+}
+
+/* ── telas do online ──────────────────────────────────────────── */
+const LETRAS_SALA = "ABCDEFGHJKLMNPQRSTUVWXYZ";   // sem I e sem O: viram 1 e 0
+
+function botaoOnline() {
+  const b = botaoJogar();
+  return { x: b.x, y: b.y + b.a + 6, l: b.l, a: 16 };
+}
+function botaoCriar() {
+  const l = Math.min(130, VL - 30), a = 22;
+  return { x: Math.round((VL - l) / 2), y: Math.round(VA * 0.42), l: l, a: a };
+}
+function botaoEntrar() {
+  const b = botaoCriar();
+  return { x: b.x, y: b.y + b.a + 10, l: b.l, a: b.a };
+}
+function tecladoGeom() {
+  const cols = 6, linhas = 4, esp = 2;
+  const l = Math.max(14, Math.min(26,
+    Math.floor((Math.min(VL, 210) - esp * (cols - 1) - 8) / cols)));
+  const a = Math.min(20, l);
+  const total = cols * l + (cols - 1) * esp;
+  return { cols: cols, linhas: linhas, esp: esp, l: l, a: a,
+           x0: Math.round((VL - total) / 2),
+           y0: Math.round(Math.min(VA * 0.42, VA - linhas * (a + esp) - a - 24)),
+           total: total };
+}
+function botaoLetra(i) {
+  const g = tecladoGeom();
+  return { x: g.x0 + (i % g.cols) * (g.l + g.esp),
+           y: g.y0 + Math.floor(i / g.cols) * (g.a + g.esp), l: g.l, a: g.a };
+}
+function botaoApagar() {
+  const g = tecladoGeom();
+  return { x: g.x0, y: g.y0 + g.linhas * (g.a + g.esp) + 6,
+           l: g.total, a: g.a };
+}
+function botaoCpu(i) {
+  const l = 20, esp = 6, n = CFG.RIVAIS_MAX + 1;
+  const total = n * l + (n - 1) * esp;
+  return { x: Math.round((VL - total) / 2) + i * (l + esp),
+           y: Math.round(VA * 0.52), l: l, a: 18 };
+}
+function botaoComecar() {
+  const l = Math.min(120, VL - 30), a = 22;
+  return { x: Math.round((VL - l) / 2),
+           y: Math.min(Math.round(VA * 0.72), VA - a - 14), l: l, a: a };
+}
+/* quantas CPUs cabem: as cadeiras que sobrarem depois da gente. Sozinho é
+   preciso pelo menos uma, senão não há partida */
+const LOTACAO_SALA = 4;
+const cpusMax = () => LOTACAO_SALA - REDE.quantos;
+const cpusMin = () => (REDE.quantos > 1 ? 0 : 1);
+
+function desenharOnline() {
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+  const topo = Math.round(VA * 0.22);
+  textoCentro("ONLINE", topo, COR.hud, 2);
+  textoCentro("jogue com quem voce chamar", topo + FONTE_H * 2 + 6, COR.disco[4], 1);
+
+  const bc = comprimir(botaoCriar(), "criar");
+  caixa(bc, COR.painel, COR.disco[5], 2);
+  texto("CRIAR SALA", bc.x + Math.round((bc.l - larguraTexto("CRIAR SALA", 1)) / 2),
+        bc.y + Math.round((bc.a - FONTE_H) / 2), COR.hud, 1);
+  const be = comprimir(botaoEntrar(), "entrar");
+  caixa(be, COR.painel, COR.disco[4], 2);
+  texto("ENTRAR COM CODIGO",
+        be.x + Math.round((be.l - larguraTexto("ENTRAR COM CODIGO", 1)) / 2),
+        be.y + Math.round((be.a - FONTE_H) / 2), COR.hud, 1);
+
+  if (REDE.ligando) textoCentro("LIGANDO...", be.y + be.a + 14, COR.hudFraco, 1);
+  else if (REDE.erro) textoCentro(REDE.erro, be.y + be.a + 14, COR.dano, 1);
+  desenharBotaoSair();
+}
+
+/* as quatro casas do código, e o teclado que as preenche */
+function desenharCodigo() {
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+  /* O teclado manda no espaço: ele é o maior bloco e não encolhe bem. As
+     casas do código encostam por cima dele e o título por cima delas — em
+     tela deitada, que é onde sobra menos altura, essa ordem é a diferença
+     entre caber e o título ficar em cima das teclas. */
+  const g = tecladoGeom();
+  const cl = 24, esp = 6, total = 4 * cl + 3 * esp;
+  const x0 = Math.round((VL - total) / 2);
+  const y0 = Math.max(14, g.y0 - 32);
+  textoCentro("CODIGO DA SALA", Math.max(3, y0 - 11), COR.hud, 1);
+  for (let i = 0; i < 4; i++) {
+    const r = { x: x0 + i * (cl + esp), y: y0, l: cl, a: 26 };
+    const ch = REDE.digitado[i];
+    caixa(r, COR.painel, ch ? COR.disco[5] : COR.hudFraco, 2);
+    if (ch) texto(ch, r.x + Math.round((r.l - larguraTexto(ch, 2)) / 2),
+                  r.y + Math.round((r.a - FONTE_H * 2) / 2) + 1, COR.hud, 2);
+  }
+
+  for (let i = 0; i < LETRAS_SALA.length; i++) {
+    const r = comprimir(botaoLetra(i), "tec" + i);
+    caixa(r, COR.painel, COR.hudFraco, 1);
+    const ch = LETRAS_SALA[i];
+    texto(ch, r.x + Math.round((r.l - larguraTexto(ch, 1)) / 2),
+          r.y + Math.round((r.a - FONTE_H) / 2), COR.hud, 1);
+  }
+  const ba = comprimir(botaoApagar(), "apagar");
+  caixa(ba, COR.painel, COR.hudFraco, 1);
+  texto("APAGAR", ba.x + Math.round((ba.l - larguraTexto("APAGAR", 1)) / 2),
+        ba.y + Math.round((ba.a - FONTE_H) / 2), COR.hudFraco, 1);
+  // o recado de erro vai ABAIXO do teclado: acima ele brigaria com as casas
+  if (REDE.erro && ba.y + ba.a + 6 + FONTE_H <= VA)
+    textoCentro(REDE.erro, ba.y + ba.a + 6, COR.dano, 1);
+  desenharBotaoSair();
+}
+
+function desenharSala() {
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
+  ctx.globalAlpha = 1;
+  const topo = Math.round(VA * 0.15);
+  textoCentro("SALA", topo, COR.hudFraco, 1);
+  textoCentro(REDE.codigo || "----", topo + 10, COR.hud, 3);
+  textoCentro("diga esse codigo para seus amigos",
+              topo + 10 + FONTE_H * 3 + 5, COR.disco[4], 1);
+
+  /* quem já chegou: um disquinho na cor da cadeira de cada um */
+  const y = Math.round(VA * 0.40);
+  const esp = 22, x0 = Math.round((VL - (REDE.quantos - 1) * esp) / 2);
+  for (let i = 0; i < REDE.quantos; i++) {
+    const pal = i === 0 ? COR : COR.rivais[(i - 1) % COR.rivais.length];
+    const vivo = REDE.vivos[i] !== 0;
+    ctx.globalAlpha = vivo ? 1 : 0.3;
+    disco(x0 + i * esp, y, 6, pal.disco[4]);
+    anel(x0 + i * esp, y, 7, 1, pal.contorno);
+    if (i === REDE.slot) texto("*", x0 + i * esp - 1, y - 15, COR.hud, 1);
+    ctx.globalAlpha = 1;
+  }
+
+  const rot = "cpus";
+  texto(rot, Math.round((VL - larguraTexto(rot, 1)) / 2),
+        botaoCpu(0).y - 9, COR.hudFraco, 1);
+  for (let i = 0; i <= CFG.RIVAIS_MAX; i++) {
+    const r = comprimir(botaoCpu(i), "cpu" + i);
+    const pode = i >= cpusMin() && i <= cpusMax();
+    const marcado = REDE.cpus === i;
+    ctx.globalAlpha = pode ? 1 : 0.25;
+    caixa(r, marcado ? COR.painel : COR.vazio,
+          marcado ? COR.disco[5] : COR.hudFraco, marcado ? 2 : 1);
+    const n = "" + i;
+    texto(n, r.x + Math.round((r.l - larguraTexto(n, 1)) / 2),
+          r.y + Math.round((r.a - FONTE_H) / 2), marcado ? COR.hud : COR.hudFraco, 1);
+    ctx.globalAlpha = 1;
+  }
+
+  if (REDE.anfitriao) {
+    const b = comprimir(botaoComecar(), "comecar");
+    const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
+    caixa(b, COR.painel, pulso > 0.5 ? COR.disco[5] : COR.disco[4], 2);
+    texto("COMECAR", b.x + Math.round((b.l - larguraTexto("COMECAR", 1)) / 2),
+          b.y + Math.round((b.a - FONTE_H) / 2), COR.hud, 1);
+  } else {
+    const b = botaoComecar();
+    const pontos = ".".repeat(1 + Math.floor(quadro / 30) % 3);
+    textoCentro("esperando o anfitriao" + pontos,
+                b.y + Math.round((b.a - FONTE_H) / 2), COR.hudFraco, 1);
+  }
+  desenharBotaoSair();
+}
+
+/* o toque nas telas de online. Devolve true se o toque foi consumido aqui */
+function toqueOnline(gx, gy) {
+  if (cena === "online") {
+    if (dentro(gx, gy, botaoSair(), 8)) { SFX.clique(); apertar("sair", sair); return true; }
+    if (dentro(gx, gy, botaoCriar(), 6)) {
+      SFX.clique(); apertar("criar", () => ligarRede(() => mandar({ t: "criar" })));
+      return true;
+    }
+    if (dentro(gx, gy, botaoEntrar(), 6)) {
+      SFX.clique();
+      apertar("entrar", () => {
+        REDE.digitado = ""; REDE.erro = ""; cena = "codigo";
+        ligarRede(() => {});
+      });
+      return true;
+    }
+    return true;
+  }
+  if (cena === "codigo") {
+    if (dentro(gx, gy, botaoSair(), 8)) {
+      SFX.clique(); apertar("sair", () => { REDE.erro = ""; cena = "online"; });
+      return true;
+    }
+    for (let i = 0; i < LETRAS_SALA.length; i++)
+      if (dentro(gx, gy, botaoLetra(i), 2)) {
+        SFX.clique(); apertar("tec" + i, null); digitar(LETRAS_SALA[i]); return true;
+      }
+    if (dentro(gx, gy, botaoApagar(), 4)) {
+      SFX.clique(); apertar("apagar", null);
+      REDE.digitado = REDE.digitado.slice(0, -1); return true;
+    }
+    return true;
+  }
+  if (cena === "sala") {
+    if (dentro(gx, gy, botaoSair(), 8)) { SFX.clique(); apertar("sair", sair); return true; }
+    if (REDE.anfitriao) {
+      for (let i = 0; i <= CFG.RIVAIS_MAX; i++)
+        if (dentro(gx, gy, botaoCpu(i), 5)) {
+          if (i < cpusMin() || i > cpusMax()) return true;
+          SFX.clique(); apertar("cpu" + i, () => mandar({ t: "cfg", cpus: i }));
+          return true;
+        }
+      if (dentro(gx, gy, botaoComecar(), 6)) {
+        SFX.clique(); apertar("comecar", () => mandar({ t: "ir" })); return true;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function digitar(ch) {
+  if (REDE.digitado.length >= 4) return;
+  REDE.erro = "";
+  REDE.digitado += ch;
+  // quatro letras já são o código inteiro: não faz sentido pedir um "ok"
+  if (REDE.digitado.length === 4)
+    ligarRede(() => mandar({ t: "entrar", codigo: REDE.digitado }));
+}
+
 function desenhar() {
   desenharMundo();
   desenharArcoIris();
@@ -4714,6 +5411,9 @@ function desenhar() {
   campoRoxo();
   vinheta();
   if (cena === "menu") desenharMenu();
+  else if (cena === "online") desenharOnline();
+  else if (cena === "codigo") desenharCodigo();
+  else if (cena === "sala") desenharSala();
   else if (cena === "fim") desenharFim();
   else { desenharHUD(); desenharAnalogico(); }
   aberracao();
