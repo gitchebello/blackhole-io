@@ -37,7 +37,21 @@ const CFG = {
      mexer na densidade muda 40 s (57 s → 100 s). Campo mais ralo obriga a
      caçar em vez de aspirar o que já está debaixo do nariz. */
   ESTRELAS: 20,          // estrelas no campo no nível 0 (cresce junto com o mundo)
-  DENSIDADE_FIXA: true,  // manter a mesma densidade quando o universo se expande
+  DENSIDADE_FIXA: true,  // acompanhar o tamanho do universo ao repor estrelas
+  /* TETO do campo. A arena quintuplica de área ao longo da partida e o número
+     de estrelas ia junto: por volta de 1min30 o campo tinha quase 100 estrelas
+     soltas, bem na hora em que o buraco já está grande, rápido e com o maior
+     alcance de sucção — e as últimas 50 estrelas saíam em 5 s, contra 21 s das
+     primeiras 50. Com o teto o campo estabiliza em 45 e cada trecho de 50
+     passa a custar de 15 a 23 s, do começo ao fim.
+     Foi tentado no lugar disso um EXPOENTE na densidade (crescer devagar em
+     vez de parar de crescer): achatava igual, mas encompridava também o
+     começo da partida — as primeiras 50 iam de 21 s para 39 s. O teto deixa a
+     abertura como estava e só corta o excesso do fim. */
+  ESTRELAS_TETO: 45,     // teto de estrelas no campo, com um rival
+  ESTRELAS_TETO_RIVAL: 8, // e o quanto ele sobe por oponente a mais: quatro
+                          // bocas no mesmo campo esvaziavam a arena e a
+                          // partida de 3 rivais ia a 127 s
 
   /* crescimento */
   CUSTO_BASE: 5,         // estrelas para sair do nível 0
@@ -1365,7 +1379,11 @@ function alvoEstrelas() {
   // e quem tem tela maior vê mais estrelas porque enxerga mais campo
   const base = (REF_L * CFG.MUNDO_MULT) * (REF_A * CFG.MUNDO_MULT);
   const agora = limites().l * limites().a;
-  return Math.round(CFG.ESTRELAS * agora / base);
+  // pelo CFG e não por `rivais.length`: reiniciar() semeia o campo antes de
+  // montar a lista de rivais, e ali ela ainda é a da partida anterior
+  const quantos = limitar(CFG.RIVAIS, 1, CFG.RIVAIS_MAX);
+  const teto = CFG.ESTRELAS_TETO + (quantos - 1) * CFG.ESTRELAS_TETO_RIVAL;
+  return Math.min(teto, Math.round(CFG.ESTRELAS * agora / base));
 }
 
 function novaEstrela(longeDe) {
