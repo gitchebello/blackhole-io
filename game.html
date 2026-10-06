@@ -1261,30 +1261,7 @@ function desenharCorpos() {
     ctx.drawImage(spr, Math.round(sx - spr.width / 2), Math.round(sy - h / 2), spr.width, h);
     const medo = cena === "jogo" && !c.comedor && cabe(buraco, c);
     if (def.rosto && R >= 7) rostoCorpo(c, sx, sy, R, medo);
-    // grande demais e você encostou: só o sinal de proibido, sem número —
-    // descobrir quando ele passa a caber faz parte da graça
-    if (c.aviso > 0 && !medo) proibido(sx, sy - R - 13, c);
   }
-}
-/* Placa de proibido: disco branco, aro vermelho e a barra na diagonal.
-   Entra estufando (passa do tamanho e volta), boia um pouco e apaga. */
-function proibido(x, y, c) {
-  c.avisoPop = (c.avisoPop || 0) * 0.86;
-  const fim = Math.min(1, c.aviso / 16);
-  const R = 6.5 * (1 + c.avisoPop * 0.6);
-  y += Math.sin(c.quadro * 0.15) * 1.2;
-  ctx.globalAlpha = fim;
-  disco(x, y + 1, R + 1, "#7a0f22");              // sombrinha embaixo
-  disco(x, y, R + 1, "#e8345a");
-  disco(x, y, R - 1.5, "#ffffff");
-  // a barra é um retângulo inclinado maciço (dois triângulos): riscos
-  // paralelos saíam listrados por causa do arredondamento
-  const L = R - 1, w = Math.max(1.3, R * 0.24), u = Math.SQRT1_2;
-  const ax = x - L * u, ay = y - L * u, bx = x + L * u, by = y + L * u;
-  const nx = w * u, ny = -w * u;
-  triangulo(ax + nx, ay + ny, bx + nx, by + ny, bx - nx, by - ny, "#e8345a");
-  triangulo(ax + nx, ay + ny, bx - nx, by - ny, ax - nx, ay - ny, "#e8345a");
-  ctx.globalAlpha = 1;
 }
 function rostoCorpo(c, x, y, r, medo) {
   const t = r < 11 ? 0 : r < 15 ? 1 : r < 20 ? 2 : r < 25 ? 3 : 4;
@@ -3006,7 +2983,6 @@ function passoCorpos(L) {
         c.molaV += 0.18;
         if (p === buraco) {
           if (c.aviso < 30 && podeTocar("boing", 260)) { SFX.boing(); vibrar(12); bater(buraco, 0.14); }
-          if (c.aviso < 30) c.avisoPop = 1;      // o ícone estufa de novo
           c.aviso = 70;
         }
       }
