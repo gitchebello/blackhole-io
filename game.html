@@ -179,7 +179,7 @@ const CFG = {
      e um "jeito" (força sorteada em volta de RIVAL_FORCA), para parecer gente. */
   RIVAIS: 7,             // quantos oponentes entram em campo
   RIVAIS_MAX: 7,
-  OPCOES_RIVAIS: [1, 3, 7],  // o que o menu oferece
+  OPCOES_RIVAIS: [1, 2, 3, 4, 5, 6, 7],  // o que o menu oferece
   RIVAL_JEITO: 0.14,     // variação da força entre bots (±14%)
   RIVAL_DISTANCIA: 2.4,  // quão perto ele chega ao caçar, em encostões
   RIVAL_MARGEM: 8,       // quantas estrelas a mais ele precisa ter para
@@ -235,17 +235,21 @@ const CFG = {
      encosta. Luas, planetas e sóis têm carinha: dormem enquanto você é
      pequeno e entram em pânico quando você já pode engolir. */
   CORPOS: [
-    { nome: "asteroide", nivel: 2,  valor: 2,  quantos: 6, rosto: false },
-    { nome: "lua",       nivel: 6,  valor: 5,  quantos: 3, rosto: true },
-    { nome: "planeta",   nivel: 10, valor: 10, quantos: 2, rosto: true },
-    { nome: "sol",       nivel: 14, valor: 20, quantos: 1, rosto: true }
+    /* RAROS de propósito (pedido do usuário): com 6 asteroides, 3 luas, 2
+       planetas e um sol — mais um extra a cada três bots — eles ocupavam o
+       campo e o jogo virava pinball. Agora cada um é um acontecimento; o
+       `renasce` é a espera, em quadros, até repor um que foi comido. */
+    { nome: "asteroide", nivel: 2,  valor: 2,  quantos: 3, renasce: 480,  rosto: false },
+    { nome: "lua",       nivel: 6,  valor: 5,  quantos: 1, renasce: 1500, rosto: true },
+    { nome: "planeta",   nivel: 10, valor: 10, quantos: 1, renasce: 2400, rosto: true },
+    { nome: "sol",       nivel: 14, valor: 20, quantos: 1, renasce: 3600, rosto: true }
   ],
   CORPO_RAZAO: 1.15,     // quanto o seu raio precisa passar o do corpo
   COMBO_JANELA: 48,      // quadros para a próxima mordida ainda contar no combo
   COMBO_BONUS: 10,       // a cada tantas, um bônus
   COMBO_PREMIO: 2,       // de tantas estrelas
   CORPO_ANTES: 3,        // níveis de antecedência com que o degrau aparece
-  CORPO_RENASCE: 360,    // quadros até repor um corpo comido (6 s)
+  CORPO_NASCE: 40,       // quadros da entrada (cresce do nada com repique)
   CORPO_ENGOLIR: 22,     // quadros caindo para dentro
 
   /* ENGOLIR O RIVAL: o momento mais lembrado de todo .io. Quem tiver o raio
@@ -258,12 +262,19 @@ const CFG = {
      bola de neve foi a soma de: precisar ser BEM maior, a barriga cheia
      depois de cada engolida e o comedor levar só uma parte do que a vítima
      perde (o resto se desfaz). */
-  ENGOLIR_RAZAO: 1.4,
+  ENGOLIR_RAZAO: 1.2,
   ENGOLIR_FRACAO: 0.25,  // parte das estrelas que a vítima perde
   ENGOLIR_MIN: 5,        // e no mínimo isto (se ela tiver)
   ENGOLIR_LEVA: 0.6,     // quanto disso vai para quem comeu
+  ENGOLIR_LEVA_LIDER: 0.35, // se quem comeu já é o líder: freio de bola de neve
   ENGOLIR_ANIM: 28,      // quadros sendo sugado para dentro
-  DIGESTAO: 300,         // barriga cheia: 5 s sem poder engolir outro rival
+  DIGESTAO: 480,         // barriga cheia: 8 s sem poder engolir outro rival
+  /* Com a razão em 1,2 (engolir mais fácil, pedido do usuário) os bots de
+     tamanho parecido viviam se comendo: 30-35 engolidas por partida. Cada bot
+     agora tem um apetite — a chance de, ao pensar, topar ir atrás de uma
+     refeição — e só olha para quem está bem perto. */
+  RIVAL_APETITE: [0.25, 0.7],
+  RIVAL_JANTA_DIST: 0.35,  // em telas
   CUSPIDO: 240,          // quadros de proteção depois de cuspido (4 s)
   RIVAL_FOGE: 0.4,       // a que distância (em telas) o bot foge de quem o come
 
@@ -1223,24 +1234,6 @@ const netunoSprite = fazerPlaneta(CFG.NETUNO_RAIO, [
   return [0, (f > 0.32 && f < 0.64) ? 1 : 0];
 });
 
-/* Na primeira vez que se vê cada planeta de poder, uma etiqueta diz o que
-   ele faz. Some depois de três aparições: quem já sabe não precisa ler, e
-   seis poderes sem explicação nenhuma era regra demais para jogo casual. */
-const DICAS = [["terra", "turbo"], ["marte", "ima"], ["saturno", "gelo"],
-               ["jupiter", "incha"], ["urano", "dreno"], ["netuno", "escudo"]];
-function desenharDicasPlanetas() {
-  if (cena !== "jogo") return;
-  const objs = { terra: terra, marte: marte, saturno: saturno, jupiter: jupiter, urano: urano, netuno: netuno };
-  for (const [nome, dica] of DICAS) {
-    const o = objs[nome];
-    if (!o || !naTela(o.x, o.y, -4)) continue;
-    if (!o.visto) { o.visto = true; salvo.vistos[nome] = (salvo.vistos[nome] || 0) + 1; gravar(); }
-    if (salvo.vistos[nome] > 3) continue;
-    const x = paraTelaX(o.x), y = paraTelaY(o.y) - 8 - 13 + Math.sin(quadro * 0.08) * 1.5;
-    texto(dica, Math.round(x - larguraTexto(dica, 1) / 2), Math.round(y), COR.hud, 1);
-  }
-}
-
 /* Desenha a escada de tamanho. A cara é desenhada com a régua do rosto do
    personagem, e sempre no traço escuro: no fundo preto o rosto vira branco,
    mas sobre um sol amarelo traço branco some. */
@@ -1249,7 +1242,11 @@ function desenharCorpos() {
   for (const c of corpos) {
     const sx = paraTelaX(c.x), sy = paraTelaY(c.y);
     const caindo = c.comedor ? 1 - c.t / CFG.CORPO_ENGOLIR : 1;
-    const rs = c.r * zoom * Math.pow(caindo, 1.3) * (1 + c.mola * 0.05);
+    // entrada: cresce do nada, passa um pouco do tamanho e assenta (easeOutBack)
+    const tn = Math.min(1, (c.nasce == null ? CFG.CORPO_NASCE : c.nasce) / CFG.CORPO_NASCE);
+    const entra = tn >= 1 ? 1 : 1 + 2.4 * Math.pow(tn - 1, 3) + 1.4 * Math.pow(tn - 1, 2);
+    if (entra < 0.08) continue;
+    const rs = c.r * zoom * Math.pow(caindo, 1.3) * entra * (1 + c.mola * 0.05);
     if (sx < -rs - 20 || sy < -rs - 20 || sx > VL + rs + 20 || sy > VA + rs + 20) continue;
     const def = CFG.CORPOS[c.k];
     const R = Math.round(rs);
@@ -1264,14 +1261,30 @@ function desenharCorpos() {
     ctx.drawImage(spr, Math.round(sx - spr.width / 2), Math.round(sy - h / 2), spr.width, h);
     const medo = cena === "jogo" && !c.comedor && cabe(buraco, c);
     if (def.rosto && R >= 7) rostoCorpo(c, sx, sy, R, medo);
-    // grande demais e você encostou: diz quanto falta
-    if (c.aviso > 0 && !medo) {
-      ctx.globalAlpha = Math.min(1, c.aviso / 20);
-      const t = "nivel " + def.nivel;
-      texto(t, Math.round(sx - larguraTexto(t, 1) / 2), Math.round(sy - R - 12 - (80 - c.aviso) * 0.05), COR.hud, 1);
-      ctx.globalAlpha = 1;
-    }
+    // grande demais e você encostou: só o sinal de proibido, sem número —
+    // descobrir quando ele passa a caber faz parte da graça
+    if (c.aviso > 0 && !medo) proibido(sx, sy - R - 13, c);
   }
+}
+/* Placa de proibido: disco branco, aro vermelho e a barra na diagonal.
+   Entra estufando (passa do tamanho e volta), boia um pouco e apaga. */
+function proibido(x, y, c) {
+  c.avisoPop = (c.avisoPop || 0) * 0.86;
+  const fim = Math.min(1, c.aviso / 16);
+  const R = 6.5 * (1 + c.avisoPop * 0.6);
+  y += Math.sin(c.quadro * 0.15) * 1.2;
+  ctx.globalAlpha = fim;
+  disco(x, y + 1, R + 1, "#7a0f22");              // sombrinha embaixo
+  disco(x, y, R + 1, "#e8345a");
+  disco(x, y, R - 1.5, "#ffffff");
+  // a barra é um retângulo inclinado maciço (dois triângulos): riscos
+  // paralelos saíam listrados por causa do arredondamento
+  const L = R - 1, w = Math.max(1.3, R * 0.24), u = Math.SQRT1_2;
+  const ax = x - L * u, ay = y - L * u, bx = x + L * u, by = y + L * u;
+  const nx = w * u, ny = -w * u;
+  triangulo(ax + nx, ay + ny, bx + nx, by + ny, bx - nx, by - ny, "#e8345a");
+  triangulo(ax + nx, ay + ny, bx - nx, by - ny, ax - nx, ay - ny, "#e8345a");
+  ctx.globalAlpha = 1;
 }
 function rostoCorpo(c, x, y, r, medo) {
   const t = r < 11 ? 0 : r < 15 ? 1 : r < 20 ? 2 : r < 25 ? 3 : 4;
@@ -1834,6 +1847,7 @@ function sortearNomes() {
   for (const r of TODOS_RIVAIS) {
     r.nome = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
     r.forca = CFG.RIVAL_FORCA * (1 + (Math.random() * 2 - 1) * CFG.RIVAL_JEITO);
+    r.apetite = CFG.RIVAL_APETITE[0] + Math.random() * (CFG.RIVAL_APETITE[1] - CFG.RIVAL_APETITE[0]);
     // bot de enfeite parece gente que comprou visual
     r.enfeite = Math.random() < 0.45 ? 0 : 1 + Math.floor(Math.random() * (ENFEITES.length - 1));
   }
@@ -2132,7 +2146,7 @@ function reiniciar() {
   buraco.digerindo = 0; buraco.engolido = 0; buraco.cuspido = 0; buraco.comedor = null; buraco.tonto = 0;
   buraco.combo = 0; buraco.comboT = 0;
   urano = null; esperaUrano = CFG.URANO_ESPERA;
-  corpos = []; esperaCorpo = CFG.CORPOS.map(() => 0);
+  corpos = []; esperaCorpo = CFG.CORPOS.map((d, k) => k === 0 ? 0 : Math.round(d.renasce * 0.3));
   flashUrano = 0; drenando = false; roubadas = [];
   buraco.dreno = 0; buraco.ritmoDreno = 0;
   netuno = null; esperaNetuno = CFG.NETUNO_ESPERA; flashAzul = 0;
@@ -2676,7 +2690,12 @@ function passoRival(rival, L) {
   // engolir alguém vale mais que qualquer estrela; fugir de quem engole vale
   // mais ainda — e as duas coisas passam na frente do resto
   const perigo = ameaca(rival);
-  const janta = perigo ? null : refeicao(rival);
+  // a vontade de caçar é sorteada a cada "pensada", pelo apetite do bot
+  if (--rival.fomeT <= 0 || rival.fomeT == null) {
+    rival.fomeT = CFG.RIVAL_PENSAR * 2;
+    rival.comFome = Math.random() < (rival.apetite || 0.5);
+  }
+  const janta = perigo || !rival.comFome ? null : refeicao(rival);
   if (perigo) {
     rival.alvo = null;
     rival.ang = Math.atan2(rival.y - perigo.y, rival.x - perigo.x) + (Math.random() - 0.5) * 0.5;
@@ -2802,7 +2821,7 @@ function maisPerto(quem) {
 /* o mais perto que `quem` consegue engolir, se estiver a uma distância
    razoável — uma tela e pouco */
 function refeicao(quem) {
-  let melhor = null, md = visaoL() * 0.5;
+  let melhor = null, md = visaoL() * CFG.RIVAL_JANTA_DIST;
   for (const p of todos()) {
     if (p === quem || !podeEngolir(quem, p)) continue;
     const d = Math.hypot(p.x - quem.x, p.y - quem.y);
@@ -2910,7 +2929,7 @@ function novoCorpo(k) {
     const a = Math.random() * Math.PI * 2, v = (0.05 + Math.random() * 0.08) / zoom;
     return { k: k, v: Math.floor(Math.random() * 3), x: x, y: y, r: r,
              vx: Math.cos(a) * v, vy: Math.sin(a) * v, quadro: Math.floor(Math.random() * 999),
-             mola: 0, molaV: 0, aviso: 0, comedor: null, t: 0 };
+             mola: 0, molaV: 0, aviso: 0, comedor: null, t: 0, nasce: 0 };
   }
   return null;
 }
@@ -2921,13 +2940,14 @@ function passoCorpos(L) {
   for (const p of todos()) maior = Math.max(maior, p.nivel + (p.inchado > 0 ? CFG.JUPITER_NIVEIS : 0));
   CFG.CORPOS.forEach((def, k) => {
     if (maior < def.nivel - CFG.CORPO_ANTES) return;
-    const alvo = def.quantos + Math.floor(rivais.length / 3);
+    const alvo = def.quantos;
     let tem = 0;
     for (const c of corpos) if (c.k === k) tem++;
     if (tem < alvo && --esperaCorpo[k] <= 0) {
       const c = novoCorpo(k);
       if (c) corpos.push(c);
-      esperaCorpo[k] = 30;
+      // entre um e outro do mesmo degrau, uma pausa: não chegam em penca
+      esperaCorpo[k] = c ? Math.round(def.renasce * 0.25) : 30;
     }
   });
 
@@ -2936,6 +2956,7 @@ function passoCorpos(L) {
     c.quadro++;
     c.molaV = (c.molaV - c.mola * 0.18) * 0.86; c.mola += c.molaV;
     if (c.aviso > 0) c.aviso--;
+    if (c.nasce < CFG.CORPO_NASCE) c.nasce++;
     c.r = raioCorpo(c.k);
 
     if (c.comedor) {
@@ -2949,7 +2970,7 @@ function passoCorpos(L) {
       if (c.t >= CFG.CORPO_ENGOLIR || g.engolido > 0) {
         if (!(g.engolido > 0)) premiarCorpo(c, g);
         corpos.splice(i, 1);
-        esperaCorpo[c.k] = CFG.CORPO_RENASCE;
+        esperaCorpo[c.k] = CFG.CORPOS[c.k].renasce;
       }
       continue;
     }
@@ -2980,12 +3001,13 @@ function passoCorpos(L) {
         const nx = dx / d, ny = dy / d, fura = pr + c.r * 0.9 - d;
         p.x -= nx * fura; p.y -= ny * fura;
         const vn = p.vx * nx + p.vy * ny;
-        if (vn > 0) { p.vx -= 1.7 * vn * nx; p.vy -= 1.7 * vn * ny; }
+        if (vn > 0) { p.vx -= 1.45 * vn * nx; p.vy -= 1.45 * vn * ny; }
         c.vx += nx * Math.max(0, vn) * 0.12; c.vy += ny * Math.max(0, vn) * 0.12;
         c.molaV += 0.18;
         if (p === buraco) {
-          if (c.aviso < 40 && podeTocar("boing", 260)) { SFX.boing(); vibrar(12); bater(buraco, 0.18); }
-          c.aviso = 80;
+          if (c.aviso < 30 && podeTocar("boing", 260)) { SFX.boing(); vibrar(12); bater(buraco, 0.14); }
+          if (c.aviso < 30) c.avisoPop = 1;      // o ícone estufa de novo
+          c.aviso = 70;
         }
       }
     }
@@ -3039,7 +3061,8 @@ function podeEngolir(a, b) {
 function engolirRival(g, v) {
   const perda = Math.min(v.comidas, Math.max(CFG.ENGOLIR_MIN, Math.round(v.comidas * CFG.ENGOLIR_FRACAO)));
   perderEstrelas(v, perda, "engolido");
-  v.premio = Math.round(perda * CFG.ENGOLIR_LEVA);
+  const lider = todos().every(o => o === g || o.comidas <= g.comidas);
+  v.premio = Math.round(perda * (lider ? CFG.ENGOLIR_LEVA_LIDER : CFG.ENGOLIR_LEVA));
   g.digerindo = CFG.DIGESTAO + CFG.ENGOLIR_ANIM;
   v.comedor = g;
   v.engolido = CFG.ENGOLIR_ANIM;
@@ -3105,7 +3128,10 @@ function cuspir(p, g) {
     for (const o of todos()) if (o !== p) d = Math.min(d, Math.hypot(x - o.x, y - o.y) * 1.6);
     if (d > md) { md = d; melhor = { x: x, y: y }; }
   }
-  p.x = melhor.x; p.y = melhor.y; p.vx = p.vy = 0;
+  // sem candidato válido (engolida herdada da rede sem saber quem comeu, ou
+  // arena ainda sem medida) ele reaparece onde está: melhor que quebrar
+  if (melhor && isFinite(melhor.x) && isFinite(melhor.y)) { p.x = melhor.x; p.y = melhor.y; }
+  p.vx = p.vy = 0;
   p.cuspido = CFG.CUSPIDO; p.comedor = null; p.premio = 0;
   p.surpresa = 0; p.tonto = 90;
   p.pulso = 1; bater(p, -0.4);
@@ -4986,7 +5012,6 @@ function desenharMundo() {
   }
 
   desenharCorpos();
-  desenharDicasPlanetas();
 
   /* Urano */
   if (urano) {
@@ -6569,7 +6594,8 @@ function toqueVisual(gx, gy) {
 
 /* Um quadradinho por opção de número de oponentes, logo acima do JOGAR. */
 function botaoOponente(i) {
-  const l = 20, esp = 6;
+  // sete opções cabem até no celular pequeno (180 px de campo)
+  const l = 18, esp = 4;
   const n = CFG.OPCOES_RIVAIS.length;
   const total = n * l + (n - 1) * esp;
   const x0 = Math.round((VL - total) / 2);
@@ -7153,6 +7179,12 @@ function receber(m) {
 }
 
 function comecarOnline(m) {
+  /* Cada partida da sala tem um número. Na tela de fim o anfitrião segue
+     mandando retratos com "fulano venceu"; um que saísse depois do pedido de
+     recomeçar chegava ao convidado já na partida nova e o jogava de volta
+     para o fim, preso lá (medido: 1 em cada 3 recomeços). Com o número, o
+     convidado descarta retrato de rodada velha. */
+  REDE.rodada = (REDE.rodada || 0) + 1;
   REDE.humanos = m.quantos; REDE.cpus = m.cpus; REDE.ativa = true;
   REDE.entradas = []; REDE.corrX = REDE.corrY = undefined;
   limitesRede = null;
@@ -7234,7 +7266,7 @@ function enviarRetrato() {
   const cp = [];
   for (const c of corpos)
     cp.push(c.k, c.v, dez(c.x), dez(c.y), c.comedor ? c.t : -1, Math.round(c.mola * 100));
-  mandar({ t: "e", j: j, s: s, b: b, r: r, cp: cp,
+  mandar({ t: "e", n: REDE.rodada || 0, j: j, s: s, b: b, r: r, cp: cp,
     L: [dez(L.x0), dez(L.y0), dez(L.x1), dez(L.y1)],
     o: [obj(terra), obj(marte), obj(saturno), obj(jupiter), obj(netuno), obj(urano)],
     c: cometa ? [dez(cometa.x), dez(cometa.y), dez(cometa.vx), dez(cometa.vy)] : 0,
@@ -7247,6 +7279,12 @@ function enviarRetrato() {
 
 function aplicarRetrato(m) {
   if (!REDE.convidado()) return;
+  // retrato de rodada ANTERIOR é descartado; se o anfitrião estiver à frente
+  // (quem reconectou ou entrou depois perdeu algum início), adota o dele
+  if (m.n !== undefined) {
+    if (m.n < (REDE.rodada || 0)) return;
+    REDE.rodada = m.n;
+  }
   const d = v => v / 10;
   limitesRede = { x0: d(m.L[0]), y0: d(m.L[1]), x1: d(m.L[2]), y1: d(m.L[3]),
                   l: d(m.L[2] - m.L[0]), a: d(m.L[3] - m.L[1]) };
