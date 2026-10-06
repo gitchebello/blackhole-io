@@ -215,6 +215,33 @@ const CFG = {
   COMETA_FREIO: 0.75,      // fica com 75% da velocidade enquanto durar
   COMETA_ESTRELAS: 5,      // e ainda derruba este tanto de estrelas
   COMETA_RABO: 34,         // comprimento do rastro azul
+
+  /* O COMETA ARCO-ÍRIS e o modo BRAWL.
+     Ele cruza o campo UMA vez por partida, por volta do primeiro minuto, e
+     não persegue ninguém: quase sempre passa longe e ninguém percebe. Só
+     quem encostar nele abre o BRAWL — e é justamente por não ser garantido
+     que ele vira acontecimento quando acontece.
+     Durante o BRAWL as estrelas do campo ficam suspensas, e o único jeito de
+     ganhar estrela é tirando do adversário: trombada, dreno de Júpiter ou
+     tiro de gelo de Saturno. Os planetas continuam nascendo — no brawl eles
+     deixam de ser bônus e passam a ser a arma. */
+  ARCOIRIS_QUANDO: 3300,   // 55 s de partida: uma passagem, e só
+  /* Bem mais lento que o cometa azul (2,5) e passando mais perto da ação. Foi
+     medido: a 1,9 e espalhando 0,95 ele ficava 1,2 s visível na tela — um
+     piscar, tempo nenhum para alguém decidir ir atrás. A 1,0 ele cruza a tela
+     em pouco mais de 3 s, e aí ver o cometa vira uma DECISÃO: largo o que
+     estou fazendo e vou lá, ou deixo passar? Com o robô da regressão, que
+     nunca desvia da rota para tocá-lo, o brawl saiu de 6 para 9 em 16
+     partidas — e quem joga de verdade vai atrás. */
+  ARCOIRIS_VEL: 1.0,
+  ARCOIRIS_RAIO: 11,
+  ARCOIRIS_RABO: 52,       // rabo comprido: é o que se enxerga de longe
+  ARCOIRIS_ESPALHA: 0.6,   // o quanto o ponto de travessia se afasta de você
+  BRAWL: 900,              // 15 segundos de pancadaria
+  BRAWL_CORACOES: 2,       // corações vazando das laterais, por quadro par
+  BRAWL_TREMOR: 2.6,       // rumor de fundo da câmera durante os 15 segundos
+  BRAWL_CASCATA: 0.7,      // velocidade de queda do arco-íris nas laterais
+  BRAWL_FAIXA: 10,         // altura de cada faixa de cor da cascata, em pixels
   ABERRACAO_MAX: 2,      // deslocamento máximo dos canais, em pixels
 
   /* controle */
@@ -1346,6 +1373,9 @@ let flashDano = 0;      // pisca vermelho nas laterais quando VOCÊ perde estrel
 let tremor = 0, flash = 0, flashLado = 0, flashTerra = 0, aberr = 0, arco = 0, quadro = 0;
 let esperaColisao = 0, cadente = null, esperaCadente = 0;
 let cometa = null, esperaCometa = 0, flashEnjoo = 0;
+/* o cometa arco-íris, o relógio da passagem única e o cronômetro do brawl */
+let arcoiris = null, esperaArcoIris = 0, arcoirisPassou = false;
+let brawl = 0, brawlDono = null;
 let zoom = 1, zoomAlvo = 1, raioTela = CFG.RAIO_BASE;
 let expansao = 0;       // 1 no instante do nível novo, decai até 0
 let historico = [];     // { t: segundos, v: [estrelas de cada um] }
@@ -1359,6 +1389,11 @@ let perdaParada = { dreno: 0, gelo: 0 };   // quadros desde o último golpe
 let ganhoParado = 0;
 let ganhoDreno = 0;     // o que VOCÊ tirou dos outros no dreno
 let coroaAnim = 0;      // 1 no instante em que a coroa troca de cabeça
+/* Quadros restantes da dica de teclado no começo da partida. No toque o
+   analógico aparece debaixo do dedo e se explica sozinho; no computador não
+   há nada na tela dizendo o que apertar, e o jogo começa com o boneco parado
+   esperando um comando que a pessoa não sabe qual é. */
+let dicaTeclado = 0;
 const cam = { x: 0, y: 0 };
 
 /* quanto custa sair do nível n: cada nível pede mais que o anterior */
@@ -1507,6 +1542,8 @@ function reiniciar() {
   ganhoDreno = 0;
   cadente = null; esperaCadente = CFG.CADENTE_INTERVALO;
   cometa = null; esperaCometa = CFG.COMETA_INTERVALO; flashEnjoo = 0;
+  arcoiris = null; esperaArcoIris = CFG.ARCOIRIS_QUANDO;
+  arcoirisPassou = false; brawl = 0; brawlDono = null;
   buraco.enjoo = 0; buraco.surpresa = 0; buraco.fervor = 0;
   buraco.elast = 0; buraco.elastV = 0;
   estrelas = [];
@@ -1637,6 +1674,17 @@ const SFX = {
     chiado(0.12, 0.34, 5200);
     tom(1500, 700, 0.09, "square", 0.12);
   },
+  /* o brawl abrindo: uma escadinha inteira subindo, sete notas como as sete
+     cores, e um chiado largo por baixo. É o som mais comprido do jogo de
+     propósito — ele só toca uma vez por partida, e quando toca a regra do
+     jogo mudou */
+  brawl() {
+    for (let i = 0; i < 7; i++)
+      tom(392 * Math.pow(1.19, i), 392 * Math.pow(1.19, i + 1),
+          0.16, "triangle", 0.2, i * 0.06);
+    chiado(0.5, 0.28, 2600, 0.02);
+    tom(160, 320, 0.6, "sawtooth", 0.16, 0.1);
+  },
   cometa() {                             // queda longa: o "passar mal"
     tom(520, 120, 0.55, "sawtooth", 0.24);
     chiado(0.4, 0.22, 700, 0.05);
@@ -1701,7 +1749,11 @@ function zerarGesto() {
 }
 /* o gesto é zerado aqui e não em reiniciar(): reiniciar roda na abertura,
    antes de `espiral` e `toque` existirem, e tocar neles ali dá erro */
-function jogar() { slotsOffline(); reiniciar(); zerarGesto(); cena = "jogo"; }
+function jogar() {
+  slotsOffline(); reiniciar(); zerarGesto();
+  dicaTeclado = PONTEIRO_FINO ? 420 : 0;      // 7 segundos, só no computador
+  cena = "jogo";
+}
 /* de novo, na mesma sala: quem manda recomeçar é sempre o anfitrião, senão
    dois cliques ao mesmo tempo dariam duas partidas diferentes */
 function rejogar() {
@@ -1784,9 +1836,15 @@ for (const ev of ["pointerup", "pointercancel"])
     if (e.pointerId === toque.id) { toque.ativo = false; toque.id = null; }
   });
 
+/* SEMPRE em minúscula para letra. Sem isso a tecla FICA PRESA nesta exata
+   combinação, que é a mais usada do teclado: segurar `d` para andar, apertar
+   shift para sugar e soltar o `d` — o navegador entrega o keyup como `D`, a
+   entrada `d` nunca é apagada e o boneco sai andando para sempre. */
+const nomeTecla = k => (k.length === 1 ? k.toLowerCase() : k);
+
 window.addEventListener("keydown", e => {
   iniciarSom();
-  teclas[e.key] = true;
+  teclas[nomeTecla(e.key)] = true;
   /* no teclado do computador o código se digita direto: obrigar a clicar
      letra por letra num teclado desenhado seria perder tempo à toa */
   if (cena === "codigo") {
@@ -1809,7 +1867,12 @@ window.addEventListener("keydown", e => {
   else if (cena === "fim" && (e.key === "Enter" || e.key === " ")) rejogar();
   else if (e.key === "Escape") sair();
 });
-window.addEventListener("keyup", e => { teclas[e.key] = false; });
+window.addEventListener("keyup", e => { teclas[nomeTecla(e.key)] = false; });
+/* Sair da janela solta tudo: alt-tab no meio de uma corrida não entrega
+   keyup nenhum, e o boneco continuava acelerando sozinho na volta. */
+window.addEventListener("blur", () => {
+  for (const k in teclas) teclas[k] = false;
+});
 
 /* ── lógica ──────────────────────────────────────────────────── */
 /* O modo sucção só liga depois de um SEMICÍRCULO completo no mesmo sentido.
@@ -1922,6 +1985,14 @@ function passoRival(rival, L) {
     rival.pensar = 1;
   } else if (vitima) {
     rival.alvo = vitima;
+    rival.pensar = 1;
+  } else if (brawl > 0) {
+    /* No BRAWL a estrela do chão não vale nada, e catar planeta só vale se
+       for para usar em alguém. Sem estrela para colher, a CPU larga a
+       colheita e vai para cima de gente — do líder, se houver quem esteja
+       na frente dela. Sem isso ela passava os quinze segundos rodando o
+       campo atrás de estrelas suspensas, e o brawl virava um intervalo. */
+    rival.alvo = lider(rival) || maisPerto(rival);
     rival.pensar = 1;
   } else if (--rival.pensar <= 0 || !vivo) {
     rival.pensar = CFG.RIVAL_PENSAR + Math.floor(Math.random() * CFG.RIVAL_PENSAR);
@@ -2086,7 +2157,33 @@ function trombada(a, b, ux, uy) {
   const quantas = Math.min(CFG.COLISAO_ESTRELAS, perdedor.comidas);
   if (quantas <= 0) return;
   perderEstrelas(perdedor, quantas, "trombada");
-  for (let k = 0; k < quantas; k++) estrelas.push(estrelaSolta(perdedor, k, quantas));
+  /* NO BRAWL A ESTRELA TROCA DE DONO. Fora dele a trombada joga as estrelas
+     do perdedor no chão, e quem quiser que vá catar — parte da graça é a
+     correria depois da pancada. No brawl o chão está congelado: cair ali
+     seria sumir com elas, e a pancada não renderia nada a ninguém. Como o
+     modo inteiro é "só se ganha tirando do outro", elas vão direto para quem
+     ganhou o encontrão, pelo mesmo fio que o dreno de Júpiter usa. */
+  if (brawl > 0) {
+    // o ponto entra quando a estrela CHEGA, dentro de passoRoubadas: somar
+    // aqui também contaria cada uma duas vezes
+    const ganhador = perdedor === a ? b : a;
+    for (let k = 0; k < quantas; k++) estrelaViajando(perdedor, ganhador);
+  } else {
+    for (let k = 0; k < quantas; k++) estrelas.push(estrelaSolta(perdedor, k, quantas));
+  }
+}
+
+/* uma estrela saindo de um e indo para o outro pelo ar. É o mesmo bicho que
+   o dreno de Júpiter cria; aqui ele nasce da trombada */
+function estrelaViajando(de, para) {
+  const rr = raioDe(de);
+  const a = Math.random() * Math.PI * 2;
+  roubadas.push({
+    x0: de.x + Math.cos(a) * rr * 0.8, y0: de.y + Math.sin(a) * rr * 0.8,
+    para: para, x: 0, y: 0, t: 0, giro: Math.random() * Math.PI, rastro: [],
+    curva: (Math.random() < 0.5 ? -1 : 1) * (0.2 + Math.random() * 0.3),
+    passo: 1 / (22 + Math.floor(Math.random() * 10))
+  });
 }
 
 /* as estrelas perdidas voltam para o campo, espalhadas em volta do perdedor */
@@ -2181,6 +2278,94 @@ function novaCometa() {
   return { x: cx0 - ca * t, y: cy0 - sa * t,
            vx: ca * v, vy: sa * v,
            vida: 2400, rastro: [] };
+}
+
+/* ── o cometa arco-íris ───────────────────────────────────────
+   Mesma construção do cometa azul — nasce fora do mapa e atravessa —, com
+   duas diferenças de propósito: ele espalha MUITO mais o ponto de travessia
+   (o cometa azul mira quase em você; este passa por onde calhar) e é mais
+   lento, para dar tempo de ir atrás quando aparece na tela. Um jogador que o
+   vê pode correr para tocá-lo; quem não viu, não perde nada que fosse seu. */
+function novoArcoIris() {
+  const L = limites();
+  const a = Math.random() * Math.PI * 2;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const esp = CFG.ARCOIRIS_ESPALHA;
+  const x0 = limitar(buraco.x + (Math.random() - 0.5) * visaoL() * esp, L.x0 + 8, L.x1 - 8);
+  const y0 = limitar(buraco.y + (Math.random() - 0.5) * visaoA() * esp, L.y0 + 8, L.y1 - 8);
+  let t = Infinity;
+  if (Math.abs(ca) > 1e-4) t = Math.min(t, ca > 0 ? (x0 - L.x0) / ca : (L.x1 - x0) / -ca);
+  if (Math.abs(sa) > 1e-4) t = Math.min(t, sa > 0 ? (y0 - L.y0) / sa : (L.y1 - y0) / -sa);
+  t = Math.max(0, t - 4);
+  const v = CFG.ARCOIRIS_VEL / zoom;
+  return { x: x0 - ca * t, y: y0 - sa * t, vx: ca * v, vy: sa * v,
+           vida: 3600, rastro: [] };
+}
+
+function passoArcoIris(L) {
+  if (!arcoiris) {
+    // uma passagem por partida: depois que ele some, não volta
+    if (arcoirisPassou || --esperaArcoIris > 0) return;
+    arcoiris = novoArcoIris(); arcoirisPassou = true;
+    return;
+  }
+  arcoiris.rastro.unshift({ x: arcoiris.x, y: arcoiris.y });
+  if (arcoiris.rastro.length > CFG.ARCOIRIS_RABO) arcoiris.rastro.pop();
+  arcoiris.x += arcoiris.vx; arcoiris.y += arcoiris.vy;
+  arcoiris.vida--;
+
+  const rc = CFG.ARCOIRIS_RAIO / zoom;
+  for (const p of todos()) {
+    if (Math.hypot(arcoiris.x - p.x, arcoiris.y - p.y) < raioDe(p) + rc) {
+      abrirBrawl(p);
+      return;
+    }
+  }
+  const fora = 60 / zoom;
+  if (arcoiris.vida <= 0 ||
+      arcoiris.x < L.x0 - fora || arcoiris.x > L.x1 + fora ||
+      arcoiris.y < L.y0 - fora || arcoiris.y > L.y1 + fora) arcoiris = null;
+}
+
+/* Estourou o cometa: as estrelas do campo param onde estão e por 15 segundos
+   a única moeda é o que se tira do outro. O escudo de Netuno NÃO defende
+   disso — o brawl não é um golpe contra quem encostou, é uma regra nova para
+   todo mundo ao mesmo tempo. */
+function abrirBrawl(quem) {
+  arcoiris = null;
+  brawl = CFG.BRAWL; brawlDono = quem;
+  anunciar("BRAWL!", COR.arcoiris[0], true);
+  SFX.brawl();
+  tremor = 20; flash = CFG.ARCO; aberr = CFG.ABERRACAO; arco = CFG.ARCO;
+  // as estrelas soltam de quem as estava puxando e ficam boiando
+  for (const e of estrelas) { e.presa = false; e.vx = 0; e.vy = 0; }
+  soltarCoracoes(quem.x, quem.y, 26, 2.2, 1);
+  quem.pulso = 1; quem.boca = 24;
+  for (let k = 0; k < 46; k++) {
+    const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random() * 1.8) / zoom;
+    faiscas.push({ x: quem.x, y: quem.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                   vida: 20 + Math.floor(Math.random() * 22), arrasto: 0.94,
+                   curva: (Math.random() - 0.5) * 0.08, tipo: "raio",
+                   cor: COR.arcoiris[Math.floor(Math.random() * COR.arcoiris.length)] });
+  }
+}
+
+/* corações entrando pelas laterais da tela enquanto o brawl dura. Nascem
+   FORA do quadro e sobem atravessando: é o exagero que diz "isto aqui não é
+   a partida de sempre" sem tomar o meio da tela, que é onde se joga. */
+function coracaoDaBorda() {
+  for (let k = 0; k < CFG.BRAWL_CORACOES; k++) {
+    const lado = Math.random() < 0.5 ? -1 : 1;
+    const x = cam.x + (lado < 0 ? -4 : VL + 4) / zoom;
+    const y = cam.y + (0.15 + Math.random() * 0.9) * VA / zoom;
+    const vida = 70 + Math.floor(Math.random() * 50);
+    coracoes.push({ x: x, y: y,
+                    vx: -lado * (0.35 + Math.random() * 0.8) / zoom,
+                    vy: -(0.25 + Math.random() * 0.6) / zoom,
+                    vida: vida, total: vida,
+                    tam: Math.floor(Math.random() * CORACOES.length),
+                    fase: Math.random() * Math.PI * 2 });
+  }
 }
 
 function passoCometa(L) {
@@ -2385,10 +2570,11 @@ function lerComandos() {
     }
 
     let tx = 0, ty = 0;
-    if (teclas.ArrowLeft  || teclas.a || teclas.A) tx -= 1;
-    if (teclas.ArrowRight || teclas.d || teclas.D) tx += 1;
-    if (teclas.ArrowUp    || teclas.w || teclas.W) ty -= 1;
-    if (teclas.ArrowDown  || teclas.s || teclas.S) ty += 1;
+    // as duas mãos servem: setas ou wasd, e as duas somam em diagonal
+    if (teclas.ArrowLeft  || teclas.a) tx -= 1;
+    if (teclas.ArrowRight || teclas.d) tx += 1;
+    if (teclas.ArrowUp    || teclas.w) ty -= 1;
+    if (teclas.ArrowDown  || teclas.s) ty += 1;
     if (tx || ty) { buraco.ang = Math.atan2(ty, tx); acelerando = true; }
 
     /* SUCÇÃO SÓ DE PÉ FIRME. Sugar andando virava "segura o espaço e passeia":
@@ -2436,12 +2622,35 @@ function passoJogadorFim(acelerando, freando) {
   if (buraco.x > L.x1 - m) { buraco.x = L.x1 - m; buraco.vx *= -0.35; }
   if (buraco.y > L.y1 - m) { buraco.y = L.y1 - m; buraco.vy *= -0.35; }
 
+  // a dica se apaga sozinha, e bem mais depressa depois do primeiro comando:
+  // quem já está andando não precisa mais ler o que apertar
+  if (dicaTeclado > 0) dicaTeclado -= acelerando || espiral > 0.15 ? 6 : 1;
+
   buraco.espiral = espiral; buraco.turbo = turbo; buraco.ima = ima;
   // quem tem gente do outro lado da rede não pensa sozinho: obedece
   for (const r of rivais) r.humano ? passoHumano(r, L) : passoRival(r, L);
   passoTrombadas();
   passoCadente(L);
   passoCometa(L);
+  passoArcoIris(L);
+
+  /* — o brawl correndo — */
+  if (brawl > 0) {
+    if (quadro % 2 === 0) coracaoDaBorda();
+    /* A câmera não para quieta enquanto o brawl dura. É um rumor, não uma
+       pancada: `Math.max` para não engolir os tremores de verdade (trombada,
+       tiro), e uma batida lenta por cima para o chão parecer respirando em
+       vez de vibrar num valor fixo por quinze segundos seguidos. */
+    // o piso da batida fica em 0,6 e não em 0,1: abaixo de 0,3 o desenho
+    // simplesmente não sacode, e a câmera ligava e desligava a cada ciclo
+    const batida = 0.6 + 0.4 * Math.sin(quadro * 0.09);
+    tremor = Math.max(tremor, CFG.BRAWL_TREMOR * batida);
+    if (--brawl === 0) {
+      anunciar("ACABOU O BRAWL", COR.hud);
+      brawlDono = null;
+      tremor = Math.max(tremor, 4);
+    }
+  }
 
   /* — crescimento suave do raio e do afastamento da câmera — */
   const raioAlvo = CFG.RAIO_BASE + buraco.nivel * CFG.RAIO_TELA_PASSO;
@@ -2461,9 +2670,10 @@ function passoJogadorFim(acelerando, freando) {
     zoom += (zoomAlvo - zoom) * 0.05;
   }
 
-  /* — o campo repõe estrelas conforme o universo abre — */
+  /* — o campo repõe estrelas conforme o universo abre. No brawl não: as que
+       estão em campo ficam suspensas e nenhuma outra entra — */
   const alvo = alvoEstrelas();
-  if (estrelas.length < alvo) estrelas.push(novaEstrela(buraco));
+  if (!brawl && estrelas.length < alvo) estrelas.push(novaEstrela(buraco));
 
   /* — estrelas: os dois disputam; ganha quem estiver proporcionalmente
        mais perto, medindo pelo próprio alcance de cada um — */
@@ -2494,7 +2704,11 @@ function passoJogadorFim(acelerando, freando) {
       if (rel < melhor) { melhor = rel; dono = g; dDono = d; }
     }
 
-    if (melhor < 1) {
+    /* SUSPENSAS. No brawl a estrela não é puxada nem engolida: ela boia onde
+       parou. É isso que troca o objetivo do jogo por quinze segundos — sem
+       estrela livre para catar, a única fonte é o adversário. */
+    if (brawl) { e.vx *= 0.86; e.vy *= 0.86; e.presa = false; }
+    else if (melhor < 1) {
       e.presa = true;
       e.sx = dono.x; e.sy = dono.y; e.salc = dono.alc;
       const dx = dono.x - e.x, dy = dono.y - e.y, d = dDono;
@@ -2518,7 +2732,7 @@ function passoJogadorFim(acelerando, freando) {
     e.x += e.vx; e.y += e.vy; e.vx *= 0.985; e.vy *= 0.985;
     if (e.x < L.x0 + 2 || e.x > L.x1 - 2) { e.vx *= -0.6; e.x = limitar(e.x, L.x0 + 2, L.x1 - 2); }
     if (e.y < L.y0 + 2 || e.y > L.y1 - 2) { e.vy *= -0.6; e.y = limitar(e.y, L.y0 + 2, L.y1 - 2); }
-    if (dono && dDono < dono.rm * 0.85) engolirEstrela(i, dono.quem);
+    if (!brawl && dono && dDono < dono.rm * 0.85) engolirEstrela(i, dono.quem);
   }
 
   /* — a Terra — */
@@ -3336,16 +3550,25 @@ function desenharMundo() {
   ctx.fillStyle = COR.borda;
   const bx0 = paraTelaX(L.x0), bx1 = paraTelaX(L.x1);
   const by0 = paraTelaY(L.y0), by1 = paraTelaY(L.y1);
+  // no brawl cada tracinho da fronteira pega uma cor da faixa, e a faixa
+  // escorre ao longo dela: a beirada do universo vira uma fita andando
   for (let y = 0; y < VA; y += 3) {
+    if (brawl > 0) ctx.fillStyle = corIris(0.3, y / 3);
     if (bx0 > -1 && bx0 < VL) ctx.fillRect(Math.round(bx0), y, 1, 2);
     if (bx1 > -1 && bx1 < VL) ctx.fillRect(Math.round(bx1), y, 1, 2);
   }
   for (let x = 0; x < VL; x += 3) {
+    if (brawl > 0) ctx.fillStyle = corIris(0.3, x / 3);
     if (by0 > -1 && by0 < VA) ctx.fillRect(x, Math.round(by0), 2, 1);
     if (by1 > -1 && by1 < VA) ctx.fillRect(x, Math.round(by1), 2, 1);
   }
+  ctx.fillStyle = COR.borda;
 
   /* estrelas */
+  // suspensas no brawl: ficam apagadas e param de piscar. Enquanto valerem
+  // zero, elas precisam LER como cenário — se continuassem brilhando igual,
+  // todo mundo perderia tempo tentando comer o que não dá mais
+  ctx.globalAlpha = brawl > 0 ? 0.34 : 1;
   for (const e of estrelas) {
     const x = paraTelaX(e.x), y = paraTelaY(e.y);
     if (x < -8 || y < -8 || x > VL + 8 || y > VA + 8) continue;
@@ -3367,6 +3590,7 @@ function desenharMundo() {
       px(x - dx / d2 * 6, y - dy / d2 * 6, COR.poeira[2]);
     }
   }
+  ctx.globalAlpha = 1;
 
   /* a Terra */
   if (terra) {
@@ -3566,6 +3790,7 @@ function desenharMundo() {
 
   desenharCadente();
   desenharCometa();
+  desenharArcoirisCometa();
   desenharBuraco();
   cam.x = guardaX; cam.y = guardaY;
 }
@@ -3801,6 +4026,117 @@ function desenharCadente() {
 }
 
 /* O rabo é o que dá o aviso: longo, azul, e engrossando perto da cabeça. */
+/* a cor arco-íris que anda: o mesmo índice para todo mundo, então a moldura,
+   a borda do mundo e o rabo do cometa piscam no mesmo compasso */
+function corIris(passo, i) {
+  const n = COR.arcoiris.length;
+  return COR.arcoiris[(((Math.floor(quadro * passo) + i) % n) + n) % n];
+}
+
+/* O cometa arco-íris. O rabo não é um degradê de uma cor só como o do cometa
+   azul: cada anel do rastro pega uma cor da faixa, e a faixa inteira ANDA a
+   cada quadro. É o que faz o bicho parecer um arco-íris em movimento em vez
+   de uma fita colorida parada. */
+function desenharArcoirisCometa() {
+  if (!arcoiris) return;
+  const R = CFG.ARCOIRIS_RAIO;
+  const n = arcoiris.rastro.length;
+  for (let i = n - 1; i >= 0; i--) {
+    const r = arcoiris.rastro[i];
+    const p = 1 - i / n;
+    const x = paraTelaX(r.x), y = paraTelaY(r.y);
+    if (x < -12 || y < -12 || x > VL + 12 || y > VA + 12) continue;
+    ctx.globalAlpha = 0.16 + p * 0.72;
+    const cor = corIris(0.22, i);
+    const w = R * 0.7 * Math.pow(p, 0.75);
+    if (w < 0.8) px(x, y, cor); else disco(x, y, w, cor);
+  }
+  ctx.globalAlpha = 1;
+
+  const x = paraTelaX(arcoiris.x), y = paraTelaY(arcoiris.y);
+  const pc = 0.5 + 0.5 * Math.sin(quadro * 0.17);
+  brilho(x, y, R * 0.8, R * 0.8 + 10 + pc * 4, corIris(0.22, 0), 0.3 + pc * 0.18, 2);
+  // cabeça em anéis concêntricos, um por cor: de longe lê como um alvo
+  // colorido, que é o que faz alguém desviar a rota para ir tocar nele
+  for (let k = COR.arcoiris.length - 1; k >= 0; k--) {
+    const rr = R * (0.28 + 0.72 * (k + 1) / COR.arcoiris.length) * (0.92 + pc * 0.14);
+    ctx.globalAlpha = 0.55 + 0.45 * (1 - k / COR.arcoiris.length);
+    disco(x, y, rr, corIris(0.22, -k));
+  }
+  ctx.globalAlpha = 1;
+  px(x, y, COR.hud);
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7) * Math.PI * 2 - quadro * 0.045;
+    const rr = R * (1.05 + 0.2 * Math.sin(quadro * 0.11 + k));
+    px(x + Math.cos(a) * rr, y + Math.sin(a) * rr, corIris(0.3, k));
+  }
+}
+
+/* A moldura do brawl: as quatro beiradas da TELA piscando arco-íris. É de
+   propósito na tela e não na borda do mapa — a borda do mapa costuma estar
+   fora de vista, e o aviso precisa estar sempre à volta de quem joga. */
+/* A CASCATA DO BRAWL. As duas laterais viram um arco-íris despencando do
+   topo até embaixo, sem parar, os quinze segundos inteiros.
+
+   Ela é desenhada uma vez só num canvas à parte — uma tira com um ciclo
+   inteiro de cores a mais de altura, e o esmaecimento para dentro da tela já
+   pintado pixel a pixel. Depois cada quadro é UM drawImage por lado, com a
+   tira deslizando para baixo. Pintar as faixas na mão a cada quadro seriam
+   uns quinze mil fillRect por segundo, e o jogo é de 60 quadros. */
+let cascata = null, cascataChave = "";
+function fazerCascata() {
+  const chave = VL + "x" + VA + "|" + COR.arcoiris.join("");
+  if (cascata && cascataChave === chave) return cascata;
+  const larg = Math.max(5, Math.round(Math.min(VL, VA) * 0.1));
+  const n = COR.arcoiris.length, faixa = CFG.BRAWL_FAIXA;
+  const ciclo = n * faixa, alt = VA + ciclo;
+  const c = document.createElement("canvas");
+  c.width = larg; c.height = alt;
+  const g = c.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  for (let y = 0; y < alt; y++) {
+    g.fillStyle = COR.arcoiris[Math.floor(y / faixa) % n];
+    for (let i = 0; i < larg; i++) {
+      // a coluna 0 é a beirada da tela e é onde a cor está inteira; para
+      // dentro ela se apaga depressa, senão a cascata tapa o campo de jogo
+      g.globalAlpha = Math.pow(1 - i / larg, 1.3);
+      g.fillRect(i, y, 1, 1);
+    }
+  }
+  cascata = { canvas: c, larg: larg, ciclo: ciclo };
+  cascataChave = chave;
+  return cascata;
+}
+
+function desenharMolduraBrawl() {
+  if (brawl <= 0) return;
+  // some suave nos últimos dois segundos, para o fim do modo ser visto vindo
+  const fim = brawl < 120 ? brawl / 120 : 1;
+  const pulso = 0.74 + 0.26 * Math.sin(quadro * 0.18);
+  const forca = pulso * fim;
+
+  const c = fazerCascata();
+  const desce = -(Math.floor(quadro * CFG.BRAWL_CASCATA) % c.ciclo);
+  ctx.globalAlpha = forca;
+  ctx.drawImage(c.canvas, 0, desce);
+  // o outro lado é a mesma tira espelhada: o esmaecimento tem de apontar
+  // para dentro da tela nos dois lados
+  ctx.save();
+  ctx.translate(VL, 0); ctx.scale(-1, 1);
+  ctx.drawImage(c.canvas, 0, desce);
+  ctx.restore();
+
+  /* fio fino em cima e embaixo, correndo no mesmo compasso: sem ele a
+     moldura fica aberta e as duas cascatas parecem duas coisas soltas */
+  ctx.globalAlpha = forca * 0.8;
+  for (let x = 0; x < VL; x += 3) {
+    ctx.fillStyle = corIris(CFG.BRAWL_CASCATA, x / 3);
+    ctx.fillRect(x, 0, 3, 2);
+    ctx.fillRect(x, VA - 2, 3, 2);
+  }
+  ctx.globalAlpha = 1;
+}
+
 function desenharCometa() {
   if (!cometa) return;
   const R = CFG.COMETA_RAIO;
@@ -4304,6 +4640,28 @@ function desenharHUD() {
   // 13, não 11: com 11 a barra de um rival encostava no número do de baixo
   const ALT = 13;
 
+  /* No brawl, a conta regressiva logo abaixo do X. Ela é a única informação
+     nova da tela e é a que decide a jogada: com três segundos no relógio,
+     partir para cima de alguém do outro lado da arena não é mais plano. */
+  if (brawl > 0) {
+    const seg = Math.ceil(brawl / 60);
+    const r = "BRAWL " + seg;
+    let bx = Math.round((VL - larguraTexto(r, 1)) / 2);
+    // letra por letra, cada uma numa cor da faixa: o rótulo pisca junto com
+    // a moldura, e as duas coisas se leem como a mesma coisa
+    for (let k = 0; k < r.length; k++) {
+      texto(r[k], bx, 19, corIris(0.3, k), 1);
+      bx += larguraTexto(r[k], 1) + VAO;
+    }
+  }
+
+  if (dicaTeclado > 0) {
+    const d = "setas movem   -   espaco suga";
+    ctx.globalAlpha = Math.min(1, dicaTeclado / 70) * 0.85;
+    textoCentro(d, VA - FONTE_H - 6, COR.hud, 1);
+    ctx.globalAlpha = 1;
+  }
+
   const meu = "" + buraco.comidas;
   texto(meu, 5, 4, COR.hud, 1);
   if (primeiro === buraco)
@@ -4567,17 +4925,35 @@ function desenharIconeSom(cx, cy, ligado) {
           ligado ? COR.disco[5] : COR.hudFraco);
 }
 
+/* Onde o título cabe. Função à parte para o teste de resolução poder medir
+   o mesmo que o desenho usa — foi assim que apareceu que o JOGAR passou a
+   subir por cima do subtítulo quando o botão ONLINE entrou na pilha. */
+function blocoTitulo() {
+  const b = botaoJogar();
+  const tam = larguraTexto("blackhole", 3) <= VL - 20 ? 3 : 2;
+  const alt = FONTE_H * tam;
+  let topo = Math.round(VA * 0.2);
+  const cabeSub = topo + alt + 6 + FONTE_H <= b.y - 4;
+  if (!cabeSub) topo = Math.max(3, Math.min(topo, b.y - alt - 5));
+  return { topo: topo, tam: tam, alt: alt, cabeSub: cabeSub,
+           subY: topo + alt + 6,
+           fim: topo + alt + (cabeSub ? 6 + FONTE_H : 0) };
+}
+
 function desenharMenu() {
   ctx.globalAlpha = 0.55;
   ctx.fillStyle = COR.vazio; ctx.fillRect(0, 0, VL, VA);
   ctx.globalAlpha = 1;
 
-  /* logo */
-  const topo = Math.round(VA * 0.2);
-  const tamNome = larguraTexto("blackhole", 3) <= VL - 20 ? 3 : 2;
-  textoCentro("blackhole", topo, COR.hud, tamNome);
-  textoCentro("devoradores de estrelas",
-              topo + FONTE_H * tamNome + 6, COR.disco[4], 1);
+  /* LOGO. A altura dele não é fixa: ela cede para o botão. Em monitor
+     largo e baixo (1366x768 dá 192 px de campo) a pilha de botões ocupa quase
+     tudo, e o JOGAR subia por cima do subtítulo. Aqui o bloco do título mede o
+     espaço que sobrou até o botão: primeiro abre mão do subtítulo, depois sobe
+     ele mesmo. Nunca o contrário — o botão é o que a pessoa veio apertar. */
+  const bl = blocoTitulo();
+  textoCentro("blackhole", bl.topo, COR.hud, bl.tam);
+  if (bl.cabeSub)
+    textoCentro("devoradores de estrelas", bl.subY, COR.disco[4], 1);
 
 
   /* quantos oponentes */
@@ -4616,7 +4992,10 @@ function desenharMenu() {
      título ele batia no boneco que fica esperando no meio da tela. */
   const rodape = bsr.y + bsr.a + 9;
   if (PONTEIRO_FINO && rodape + FONTE_H <= VA)
-    textoCentro("wasd anda   -   shift suga parado", rodape, COR.hudFraco, 1);
+    textoCentro("setas ou wasd andam", rodape, COR.hudFraco, 1);
+  if (PONTEIRO_FINO && rodape + FONTE_H * 2 + 2 <= VA)
+    textoCentro("espaco suga, parado no lugar", rodape + FONTE_H + 2,
+                COR.hudFraco, 1);
 
   const b = comprimir(botaoJogar(), "jogar");
   const pulso = (Math.sin(quadro * 0.06) + 1) / 2;
@@ -4838,6 +5217,8 @@ const REDE = {
   ws: null, ligando: false, erro: "", codigo: "", digitado: "",
   slot: 0, anfitriao: false, quantos: 1, cpus: 1, humanos: 1, vivos: [1],
   ativa: false,        // partida online em andamento
+  senha: "",           // a chave da minha cadeira, para poder voltar a ela
+  religando: 0, caiu: false, saindo: false, pausado: false,
   entradas: [],        // anfitrião: último comando recebido de cada cadeira
   corrX: undefined, corrY: undefined,
   convidado: function () { return this.ativa && !this.anfitriao; }
@@ -4855,26 +5236,70 @@ function ligarRede(depois) {
                        location.host + "/ws");
   } catch (e) { REDE.ligando = false; REDE.erro = "SEM CONEXAO"; return; }
   REDE.ws = ws;
-  ws.onopen = () => { REDE.ligando = false; depois(); };
+  /* Tempo limite. Sem ele, um servidor que aceita a conexão mas não responde
+     ao aperto de mão deixa a tela em "LIGANDO..." para sempre, e quem está do
+     lado de cá não tem como saber se é lentidão ou se quebrou. */
+  const relogio = setTimeout(() => {
+    if (REDE.ws === ws && ws.readyState !== 1) {
+      REDE.ligando = false; REDE.erro = "SEM CONEXAO";
+      try { ws.close(); } catch (e) {}
+      REDE.ws = null;
+    }
+  }, 6000);
+  ws.onopen = () => { clearTimeout(relogio); REDE.ligando = false; depois(); };
   ws.onmessage = ev => { try { receber(JSON.parse(ev.data)); } catch (e) {} };
   ws.onerror = () => { REDE.ligando = false; REDE.erro = "SEM CONEXAO"; };
   ws.onclose = () => {
+    clearTimeout(relogio);
     REDE.ligando = false; REDE.ws = null;
-    if (REDE.ativa || cena === "sala") quedaDeRede("CONEXAO PERDIDA");
+    // caiu com sala na mão: tenta voltar em vez de desistir
+    if (REDE.codigo && !REDE.saindo) { REDE.caiu = true; setTimeout(tentarVoltar, 1200); }
   };
 }
 function mandar(o) {
   if (REDE.ws && REDE.ws.readyState === 1) REDE.ws.send(JSON.stringify(o));
 }
 
+/* VOLTAR PARA A CADEIRA. O celular derruba o socket por qualquer coisa: a
+   tela travou, você trocou de app para passar o código, o wi-fi vacilou. Sem
+   isto a sala evaporava justo no minuto em que ela existe para ser divulgada.
+   A senha veio junto do primeiro "sala": ela diz ao servidor QUAL cadeira era
+   a sua, com a cor e o placar que estavam nela. */
+function tentarVoltar() {
+  if (!REDE.codigo || REDE.saindo) return;
+  if (REDE.ws && REDE.ws.readyState <= 1) return;      // já indo
+  if (++REDE.religando > 40) { quedaDeRede("CONEXAO PERDIDA"); return; }
+  ligarRede(() => mandar({ t: "voltar", codigo: REDE.codigo, senha: REDE.senha }));
+}
+
+/* Um "oi" de tempos em tempos. Roteador doméstico fecha conexão parada, e no
+   saguão — esperando os amigos chegarem — não passa mais nada pelo fio. */
+setInterval(() => {
+  if (REDE.codigo && REDE.ws && REDE.ws.readyState === 1) mandar({ t: "oi" });
+}, 15000);
+
+/* Voltar para a aba é o melhor momento para reconectar: é quando o navegador
+   volta a dar corda aos temporizadores, e é exatamente quando a pessoa quer
+   ver a sala de novo. */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  if (REDE.codigo && (!REDE.ws || REDE.ws.readyState > 1)) {
+    REDE.religando = 0; tentarVoltar();
+  }
+});
+
 function largarSala() {
+  REDE.saindo = true;
   mandar({ t: "tchau" });
+  REDE.senha = ""; REDE.caiu = false; REDE.pausado = false; REDE.religando = 0;
+  setTimeout(() => { REDE.saindo = false; }, 500);
   REDE.ativa = false; REDE.anfitriao = false; REDE.codigo = "";
   REDE.corrX = REDE.corrY = undefined;
   limitesRede = null; slotsOffline();
 }
 function quedaDeRede(msg) {
   REDE.ativa = false; REDE.anfitriao = false; REDE.codigo = "";
+  REDE.senha = ""; REDE.caiu = false; REDE.pausado = false; REDE.religando = 0;
   REDE.corrX = REDE.corrY = undefined;
   limitesRede = null; slotsOffline();
   REDE.erro = msg || ""; REDE.digitado = "";
@@ -4907,7 +5332,16 @@ function receber(m) {
   if (m.t === "sala") {
     REDE.codigo = m.codigo; REDE.slot = m.slot; REDE.anfitriao = m.anfitriao;
     REDE.quantos = m.quantos; REDE.cpus = m.cpus; REDE.vivos = m.vivos;
+    REDE.senha = m.senha || REDE.senha;
     REDE.erro = ""; REDE.digitado = "";
+    REDE.caiu = false; REDE.religando = 0;
+    /* A pausa sai da LISTA de quem está ligado, não de um aviso avulso. O
+       aviso é um tiro só: quem estiver com a conexão trocando de pé no exato
+       instante em que ele passa nunca fica sabendo que a partida voltou, e
+       fica preso na tela de espera para sempre. `vivos[0]` vem em toda
+       mensagem de sala, e mensagem de sala vai a todos sempre que alguém
+       entra, sai ou volta. */
+    REDE.pausado = !m.anfitriao && m.vivos && !m.vivos[0];
     if (REDE.ativa) { REDE.humanos = m.quantos; marcarSlots(); }
     else if (cena !== "sala") { cena = "sala"; SFX.clique(); }
   } else if (m.t === "erro") {
@@ -4916,6 +5350,10 @@ function receber(m) {
     comecarOnline(m);
   } else if (m.t === "menu") {
     REDE.ativa = false; limitesRede = null; cena = "sala"; reiniciar();
+  } else if (m.t === "pausa") {
+    REDE.pausado = true;
+  } else if (m.t === "segue") {
+    REDE.pausado = false;
   } else if (m.t === "acabou") {
     quedaDeRede("SALA ENCERRADA");
   } else if (m.t === "e") {
@@ -4933,7 +5371,9 @@ function comecarOnline(m) {
   gerarCamadas();               // a nebulosa ganha a cor de cada participante
   reiniciar();
   marcarSlots();
-  zerarGesto(); cena = "jogo";
+  zerarGesto();
+  dicaTeclado = PONTEIRO_FINO ? 420 : 0;
+  cena = "jogo";
 }
 
 /* ── o anfitrião move os bonecos de carne e osso ─────────────── */
@@ -5004,6 +5444,9 @@ function enviarRetrato() {
     L: [dez(L.x0), dez(L.y0), dez(L.x1), dez(L.y1)],
     o: [obj(terra), obj(marte), obj(saturno), obj(jupiter), obj(netuno)],
     c: cometa ? [dez(cometa.x), dez(cometa.y), dez(cometa.vx), dez(cometa.vy)] : 0,
+    ai: arcoiris ? [dez(arcoiris.x), dez(arcoiris.y),
+                    dez(arcoiris.vx), dez(arcoiris.vy)] : 0,
+    k: brawl,
     d: cadente ? [dez(cadente.x), dez(cadente.y), dez(cadente.vx), dez(cadente.vy)] : 0,
     w: vencedor ? vencedor.slot : -1 });
 }
@@ -5064,6 +5507,19 @@ function aplicarRetrato(m) {
     return o;
   };
   cometa = voador(m.c, cometa); cadente = voador(m.d, cadente);
+  arcoiris = voador(m.ai, arcoiris);
+
+  /* O BRAWL vem pronto do anfitrião. O convidado não decide se ele começa —
+     quem toca no cometa é decidido lá —, mas a festa (som, tremor, corações)
+     é local: sem isso a mudança de regra chegaria calada. */
+  if (m.k > 0 && brawl <= 0) {
+    SFX.brawl(); tremor = 20; flash = CFG.ARCO; arco = CFG.ARCO;
+    aberr = CFG.ABERRACAO;
+    anunciar("BRAWL!", COR.arcoiris[0], true);
+  } else if (m.k <= 0 && brawl > 0) {
+    anunciar("ACABOU O BRAWL", COR.hud);
+  }
+  brawl = m.k;
 
   const nb = m.b.length / 5;
   blocos.length = nb;
@@ -5088,13 +5544,20 @@ function aplicarRetrato(m) {
     terminar(todos().find(p => p.slot === m.w) || buraco);
 }
 
-function rastrear(o) {
-  o.rastro.push({ x: o.x, y: o.y });
-  if (o.rastro.length > 18) o.rastro.shift();
+/* unshift e não push: em todo desenho de rastro deste jogo o índice 0 é a
+   CABEÇA, e é dela que sai a espessura. Invertido, o rabo do cometa saía
+   grosso na ponta e fino no bicho. */
+function rastrear(o, quanto) {
+  o.rastro.unshift({ x: o.x, y: o.y });
+  if (o.rastro.length > (quanto || 18)) o.rastro.pop();
 }
 
 /* ── o quadro do convidado ────────────────────────────────────── */
 function passoConvidado() {
+  /* Sem anfitrião não há mundo: ele é quem simula. Melhor congelar do que
+     deixar o boneco andando sozinho por três minutos e reaparecer, quando a
+     rede voltar, num lugar que não tem nada a ver com o que o jogador viu. */
+  if (REDE.pausado || REDE.caiu) { passoParticulas(); return; }
   const c = lerComandos();
 
   /* PREVISÃO. A mesma conta do anfitrião, rodada aqui para o boneco andar no
@@ -5134,9 +5597,15 @@ function passoConvidado() {
 
   /* o que voa segue em frente entre um retrato e outro: parado esperando
      pacote, o bloco de gelo andaria aos trancos de três em três quadros */
-  for (const o of [cometa, cadente]) if (o) { o.x += o.vx; o.y += o.vy; rastrear(o); }
+  if (cometa) { cometa.x += cometa.vx; cometa.y += cometa.vy;
+                rastrear(cometa, CFG.COMETA_RABO); }
+  if (cadente) { cadente.x += cadente.vx; cadente.y += cadente.vy;
+                 rastrear(cadente, 14); }
   for (const g of blocos) { g.x += g.vx; g.y += g.vy; g.giro += 0.25; rastrear(g); }
   for (const e of roubadas) { e.giro += 0.2; rastrear(e); }
+  if (arcoiris) { arcoiris.x += arcoiris.vx; arcoiris.y += arcoiris.vy;
+                  rastrear(arcoiris, CFG.ARCOIRIS_RABO); }
+  if (brawl > 0 && quadro % 2 === 0) coracaoDaBorda();
   if (terra) terra.quadro++;
   for (const e of estrelas) e.fase += e.ritmo;
 
@@ -5233,12 +5702,26 @@ function desenharOnline() {
         bc.y + Math.round((bc.a - FONTE_H) / 2), COR.hud, 1);
   const be = comprimir(botaoEntrar(), "entrar");
   caixa(be, COR.painel, COR.disco[4], 2);
-  texto("ENTRAR COM CODIGO",
-        be.x + Math.round((be.l - larguraTexto("ENTRAR COM CODIGO", 1)) / 2),
+  /* "TENHO UM CODIGO" e não "ENTRAR COM CODIGO": o segundo dá para ler como
+     "entre, que o código aparece", e quem queria CRIAR a sala acabava na tela
+     de digitar, olhando para quatro casinhas vazias esperando o código
+     nascer ali. Os dois botões agora dizem de que lado da conversa você está. */
+  texto("TENHO UM CODIGO",
+        be.x + Math.round((be.l - larguraTexto("TENHO UM CODIGO", 1)) / 2),
         be.y + Math.round((be.a - FONTE_H) / 2), COR.hud, 1);
 
-  if (REDE.ligando) textoCentro("LIGANDO...", be.y + be.a + 14, COR.hudFraco, 1);
-  else if (REDE.erro) textoCentro(REDE.erro, be.y + be.a + 14, COR.dano, 1);
+  /* o estado da ligação bem no caminho do olho, e não numa linha fina de
+     rodapé: no celular um "SEM CONEXAO" miúdo embaixo passa despercebido e a
+     tela parece só não ter feito nada */
+  const yEst = be.y + be.a + 16;
+  if (REDE.ligando) {
+    textoCentro("LIGANDO" + ".".repeat(1 + Math.floor(quadro / 20) % 3),
+                yEst, COR.hud, 1);
+  } else if (REDE.erro) {
+    textoCentro(REDE.erro, yEst, COR.dano, 1);
+    // o endereço que ele tentou: é o que diz se o celular entrou pelo lugar certo
+    textoCentro(location.host, yEst + 11, COR.hudFraco, 1);
+  }
   desenharBotaoSair();
 }
 
@@ -5255,7 +5738,7 @@ function desenharCodigo() {
   const cl = 24, esp = 6, total = 4 * cl + 3 * esp;
   const x0 = Math.round((VL - total) / 2);
   const y0 = Math.max(14, g.y0 - 32);
-  textoCentro("CODIGO DA SALA", Math.max(3, y0 - 11), COR.hud, 1);
+  textoCentro("DIGITE O CODIGO", Math.max(3, y0 - 11), COR.hud, 1);
   for (let i = 0; i < 4; i++) {
     const r = { x: x0 + i * (cl + esp), y: y0, l: cl, a: 26 };
     const ch = REDE.digitado[i];
@@ -5395,6 +5878,22 @@ function digitar(ch) {
     ligarRede(() => mandar({ t: "entrar", codigo: REDE.digitado }));
 }
 
+/* Um aviso quando o fio está solto. Vale para qualquer tela do online: sem
+   ele a sala simplesmente para de responder e ninguém sabe se é a internet,
+   se é o amigo, ou se o jogo quebrou. */
+function desenharAvisoRede() {
+  if (!REDE.caiu && !REDE.pausado) return;
+  const txt = REDE.caiu ? "RELIGANDO" : "ESPERANDO O ANFITRIAO";
+  const pontos = ".".repeat(1 + Math.floor(quadro / 22) % 3);
+  const l = larguraTexto(txt + "...", 1) + 12;
+  const r = { x: Math.round((VL - l) / 2), y: Math.round(VA * 0.5) - 9,
+              l: l, a: 18 };
+  caixa(r, COR.painel, REDE.caiu ? COR.dano : COR.hudFraco, 2);
+  const t = txt + pontos;
+  texto(t, r.x + Math.round((r.l - larguraTexto(t, 1)) / 2),
+        r.y + Math.round((r.a - FONTE_H) / 2), COR.hud, 1);
+}
+
 function desenhar() {
   desenharMundo();
   desenharArcoIris();
@@ -5406,6 +5905,7 @@ function desenhar() {
   desenharClaraoEnjoo();
   desenharBrilhoRoxo();
   desenharBrilhoLateral();
+  desenharMolduraBrawl();
   desenharBrilhoDano();
   redemoinho();
   campoRoxo();
@@ -5416,6 +5916,7 @@ function desenhar() {
   else if (cena === "sala") desenharSala();
   else if (cena === "fim") desenharFim();
   else { desenharHUD(); desenharAnalogico(); }
+  if (REDE.codigo) desenharAvisoRede();
   aberracao();
 }
 
