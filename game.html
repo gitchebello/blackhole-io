@@ -157,6 +157,9 @@ const CFG = {
   NEBULOSAS: 10,          // nuvens de gás espalhadas pelo mapa; o resto é vácuo
 
   ROSTO: true,           // o buraco negro tem carinha
+  CARA_DOR: 30,          // quadros de olho em X depois de perder estrela
+  CARA_SONO: 300,        // parado este tanto (5 s) e começa a pescar
+  CARA_LANTERNA: 900,    // 15 s seguidos em último e cai uma lágrima
 
   /* rival */
   RIVAL_FORCA: 0.76,     // o quanto o rival acelera comparado a você
@@ -1199,6 +1202,67 @@ const BOCAS_SORRISO = [
   ["#############", ".###########.", "..#########..", "...#######..."]
 ];
 
+/* ── caras dos poderes e dos humores ──────────────────────────
+   Todas em cinco tamanhos, como o resto do rosto. As que dá para derivar de
+   outra (espelho, giro, de cabeça para baixo) saem por função, para não
+   desenhar a mesma coisa duas vezes. */
+const espelhar = spr => spr.map(l => l.split("").reverse().join(""));
+const girar90 = spr => spr[0].split("").map((_, x) => spr.map(l => l[x]).reverse().join(""));
+/* perdeu estrela: olho em X por meio segundo */
+const OLHOS_X = [
+  ["#.#", ".#.", "#.#"],
+  ["#...#", ".#.#.", "..#..", ".#.#.", "#...#"],
+  ["##..##", ".####.", "..##..", ".####.", "##..##"],
+  ["##....##", ".##..##.", "..####..", "...##...", "..####..", ".##..##.", "##....##"],
+  ["##.....##", ".##...##.", "..##.##..", "...###...", "..##.##..", ".##...##.", "##.....##"]
+];
+/* turbo: ">" no olho esquerdo e "<" no direito — a cara de ">_<" de esforço */
+const OLHOS_ESFORCO = [
+  ["#..", ".#.", "#.."],
+  ["#...", ".##.", "...#", ".##.", "#..."],
+  ["##...", ".##..", "..###", ".##..", "##..."],
+  ["##....", ".###..", "...###", "....##", "...###", ".###..", "##...."],
+  ["###.....", ".####...", "...####.", ".....###", "...####.", ".####...", "###....."]
+];
+/* ímã: olho em espiral. As quatro rotações de cada uma, trocadas a cada
+   poucos quadros, fazem a espiral girar — hipnotizado de verdade */
+const OLHOS_ESPIRAL = [
+  ["####", "...#", ".#.#", ".###"],
+  ["#####", "....#", ".##.#", ".#..#", ".####"],
+  ["######", ".....#", ".###.#", ".#.#.#", ".#...#", ".#####"],
+  ["#######", "......#", ".####.#", ".#..#.#", ".#.##.#", ".#....#", ".######"],
+  ["#########", "........#", ".######.#", ".#....#.#", ".#.##.#.#", ".#.#..#.#",
+   ".#.####.#", ".#......#", ".########"]
+].map(spr => { const g = [spr]; for (let i = 0; i < 3; i++) g.push(girar90(g[i])); return g; });
+/* olho fechado num risco: a piscada de quem mira */
+const OLHO_PISCA = [
+  ["####"], ["#####"], ["######", ".####."], ["########", ".######."],
+  ["#########", ".#######."]
+];
+/* dormindo: o arco do olho apertado de cabeça para baixo ("u u") */
+const OLHOS_FECHADO = OLHOS_GORDO.map(spr => spr.slice().reverse());
+/* boca em risco: concentração (gelo) e esforço (turbo) */
+const BOCAS_RETA = [
+  ["###"], ["#####"], ["#######"], ["#########"], ["###########", "###########"]
+];
+/* boca ondulada: o "~" de quem está tonto de tanto puxar */
+const BOCAS_ONDA = [5, 7, 9, 11, 13].map(w => {
+  let a = "", b = "";
+  for (let x = 0; x < w; x++) { const m = x % 4; a += m === 1 || m === 2 ? "#" : "."; b += m === 0 || m === 3 ? "#" : "."; }
+  return [a, b];
+});
+/* sorriso de canto de boca: reto de um lado, subindo do outro — vilão */
+const BOCAS_VILAO = [5, 7, 9, 11, 13].map((w, t) => {
+  const h = t < 2 ? 2 : 3, linhas = [];
+  for (let y = 0; y < h; y++) {
+    let l = "";
+    for (let x = 0; x < w; x++)
+      l += (y === h - 1 ? x <= w - h : x === w - 1 - y) ? "#" : ".";
+    linhas.push(l);
+  }
+  return linhas;
+});
+
 /* A coroa do primeiro lugar, em três tamanhos como o resto dos sprites:
    um desenho só ficaria grande demais no boneco pequeno e sumiria no grande. */
 const COROAS = [
@@ -1667,6 +1731,7 @@ function reiniciar() {
     r.tiro = 0; r.recargaTiro = 0; r.dreno = 0; r.ritmoDreno = 0; r.imune = 0;
     r.inchado = 0; r.nivelIncha = 0; r.incha = 0; r.inchaV = 0;
     r.murcha = 0; r.inchaPrep = 0; r.inchadoAnt = 0;
+    r.dor = 0; r.parado = 0; r.lanterna = 0;
     r.espiral = 0; r.turbo = 0; r.ima = 0;
     // espalhados em leque à mesma distância: ninguém começa com vantagem
     const a = -Math.PI / 2 + (i + 1) / (rivais.length + 1) * Math.PI * 2;
@@ -1683,6 +1748,7 @@ function reiniciar() {
   jupiter = null; esperaJupiter = CFG.JUPITER_ESPERA; flashJupiter = 0;
   buraco.inchado = 0; buraco.nivelIncha = 0; buraco.incha = 0; buraco.inchaV = 0;
   buraco.murcha = 0; buraco.inchaPrep = 0; buraco.inchadoAnt = 0;
+  buraco.dor = 0; buraco.parado = 0; buraco.lanterna = 0;
   urano = null; esperaUrano = CFG.URANO_ESPERA;
   flashUrano = 0; drenando = false; roubadas = [];
   buraco.dreno = 0; buraco.ritmoDreno = 0;
@@ -3072,10 +3138,20 @@ function passoParticulas() {
     a.r += 1.1 / zoom;
     if (--a.vida <= 0) aneis.splice(i, 1);
   }
-  for (const p of todos()) {
+  const ts = todos();
+  for (const p of ts) {
     molaElastica(p);
     passoIncha(p);
     p.pulso *= 0.85;
+    if (p.dor > 0) p.dor--;
+    // parado e sem sugar: conta para o sono. Velocidade medida em TELA
+    const vel = Math.hypot(p.vx, p.vy) * (p === buraco ? zoom : zoomDoNivel(p.nivel));
+    const sugando = (p === buraco ? espiral : p.espiral || 0) > 0.05;
+    p.parado = vel < 0.06 && !sugando ? (p.parado || 0) + 1 : 0;
+    // último sozinho (empate não conta), e só valendo partida
+    const ultimo = cena === "jogo" && ts.length > 1 &&
+                   ts.every(o => o === p || o.comidas > p.comidas);
+    p.lanterna = ultimo ? (p.lanterna || 0) + 1 : 0;
     // esfria devagar: engolir em sequência mantém o disco aceso, parar apaga
     p.fervor = (p.fervor || 0) * 0.978;
   }
@@ -3239,6 +3315,7 @@ function perderEstrelas(dono, n, origem) {
   }
   const antes = dono.comidas;
   dono.comidas = Math.max(0, dono.comidas - n);
+  if (antes > dono.comidas) dono.dor = CFG.CARA_DOR;
   /* Um aviso só para TODO tipo de dano: trombada, gelo, dreno ou cometa. O
      jogador não precisa decorar uma cor por arma — vermelho na borda quer
      dizer "está saindo estrela de você", e o texto no meio diz quanto. */
@@ -4606,11 +4683,21 @@ function desenharRosto(p, bx, by, r, blush, ex, ey) {
   const gord = gordura(p);
   const gordo = gord > 0.5;
   const estrelado = p.imune > 0 && !pasmo;   // estrela vence até o inchado
+  const dor = p.dor > 0;
+  const comTurbo = p === buraco ? turbo > 0 : p.turbo > 0;
+  const comIma = p === buraco ? ima > 0 : p.ima > 0;
+  const mirando = p.tiro > 0, vilao = p.dreno > 0;
+  const chorando = (p.lanterna || 0) > CFG.CARA_LANTERNA;
+  const sono = (p.parado || 0) > CFG.CARA_SONO ? p.parado - CFG.CARA_SONO : -1;
 
-  // a surpresa é curta e passa na frente do enjoo: quem acabou de levar uma
-  // trombada arregala os olhos, e volta a passar mal logo em seguida
-  let olho, boca;
-  if (pasmo) {
+  /* A ordem é a do que mais importa SENTIR naquele instante: a dor (meio
+     segundo) passa na frente de tudo, depois a surpresa, depois o poder que
+     você pegou, e por último os humores lentos — enjoo, choro, sono. */
+  let olho, olhoD = null, boca, bravo = false, lagrima = false, zzz = -1;
+  if (dor) {
+    olho = OLHOS_X[t];
+    boca = BOCAS_O[Math.max(0, t - 1)];
+  } else if (pasmo) {
     olho = OLHOS[Math.min(OLHOS.length - 1, t + 1)];   // olhos de um tamanho acima
     boca = BOCAS_O[t];
   } else if (gordo) {
@@ -4621,14 +4708,50 @@ function desenharRosto(p, bx, by, r, blush, ex, ey) {
   } else if (estrelado) {
     olho = OLHOS[t];                             // só para medir as bochechas
     boca = p.boca > 0 ? BOCAS_O[t] : BOCAS_SORRISO[t];
+  } else if (mirando) {
+    // gelo: fecha um olho para mirar e franze a testa
+    olho = OLHO_PISCA[t]; olhoD = OLHOS[t];
+    boca = BOCAS_RETA[Math.max(0, t - 1)];
+    bravo = true;
+  } else if (vilao) {
+    // dreno: pálpebra baixa, sobrancelha de malvado e sorriso de canto
+    olho = OLHOS_ENJOO[t];
+    boca = BOCAS_VILAO[t];
+    bravo = true;
+  } else if (comIma) {
+    olho = OLHOS_ESPIRAL[t][Math.floor(quadro / 5) % 4];
+    boca = BOCAS_ONDA[t];
+  } else if (comTurbo) {
+    olho = OLHOS_ESFORCO[t]; olhoD = espelhar(olho);
+    boca = BOCAS_RETA[t];
+    ventoTurbo(p, bx, by, r);
   } else if (doente) {
     olho = OLHOS[t];
     boca = BOCAS_TRISTE[t];
     gotaDeSuor(bx, by, r, t);
+  } else if (chorando) {
+    olho = OLHOS[t];
+    boca = BOCAS_TRISTE[t];
+    lagrima = true;
+  } else if (sono >= 0) {
+    /* Pescando: pálpebra pesada o tempo todo, uma piscada lenta no começo de
+       cada ciclo e um bocejo enorme no meio, com o "z" subindo depois. */
+    const c = sono % 300;
+    olho = OLHOS_ENJOO[t];
+    boca = BOCAS[Math.max(0, t - 1)];
+    if (c < 36) {
+      if (c >= 12 && c < 24) olho = OLHOS_FECHADO[t];
+    } else if (c >= 80 && c < 170) {
+      olho = OLHOS_FECHADO[t];
+      const k = c < 96 ? (c - 80) / 16 : c > 154 ? (170 - c) / 16 : 1;
+      boca = k > 0.66 ? BOCAS_O[Math.min(4, t + 1)] : k > 0.33 ? BOCAS_O[t] : BOCAS_O[Math.max(0, t - 1)];
+    }
+    if (c >= 120) zzz = (c - 120) / 180;
   } else {
     olho = OLHOS[t];
     boca = p.boca > 0 ? BOCAS_O[t] : BOCAS[t];
   }
+  olhoD = olhoD || olho;
   // enquanto passa mal a bochecha sai de cena: é o que faz o rostinho perder
   // o viço, mais do que a boca virada
   if ((t >= 1 && !doente) || gord > 0.02) {
@@ -4644,14 +4767,75 @@ function desenharRosto(p, bx, by, r, blush, ex, ey) {
   }
   // com as bochechas cheias os olhos sobem um pouco: estão sendo empurrados
   const yo = by - r * (0.13 + gord * 0.05) * ey + oy;
+  const xe = bx - sep * ex + ox, xd = bx + sep * ex + ox;
   if (estrelado) {
-    olhosDeEstrela(bx - sep * ex + ox, yo, t);
-    olhosDeEstrela(bx + sep * ex + ox, yo, t);
+    olhosDeEstrela(xe, yo, t);
+    olhosDeEstrela(xd, yo, t);
   } else {
-    carimbo(olho, bx - sep * ex + ox, yo, COR.rosto);
-    carimbo(olho, bx + sep * ex + ox, yo, COR.rosto);
+    carimbo(olho, xe, yo, COR.rosto);
+    carimbo(olhoD, xd, yo, COR.rosto);
+  }
+  if (bravo) {
+    const topo = yo - Math.max(olho.length, olhoD.length) / 2;
+    sobrancelha(xe, topo, olho[0].length, -1, t);
+    sobrancelha(xd, topo, olhoD[0].length, 1, t);
   }
   carimbo(boca, bx + ox, by + r * (0.34 + gord * 0.04) * ey + oy, COR.rosto);
+  if (lagrima) gotaDeLagrima(xe - olho[0].length / 2, yo + olho.length / 2, r, t);
+  if (zzz >= 0) {
+    // o "z" nasce do lado da cabeça, sobe bambeando e apaga
+    ctx.globalAlpha = zzz < 0.8 ? 1 : (1 - zzz) / 0.2;
+    texto("z", bx + r * 0.7 + zzz * 6, by - r * 0.6 - zzz * (r * 0.6 + 8) +
+          Math.sin(zzz * 9) * 1.5, COR.rosto, 1);
+    ctx.globalAlpha = 1;
+  }
+}
+
+/* Sobrancelha brava: um risco que desce de fora para dentro. `lado` é -1 no
+   olho esquerdo e 1 no direito; nos rostos grandes ganha 2 px de grossura. */
+function sobrancelha(x, topo, w, lado, t) {
+  const n = Math.max(3, Math.round(w * 0.95));
+  const queda = Math.max(1.5, n * 0.42);
+  for (let i = 0; i < n; i++) {
+    const xx = Math.round(x + lado * (w / 2) - lado * i);
+    const yy = Math.round(topo - 2 - (1 - i / (n - 1)) * queda);
+    px(xx, yy, COR.rosto);
+    if (t >= 3) px(xx, yy + 1, COR.rosto);
+  }
+}
+
+/* A lágrima de quem está em último faz tempo: escorre do canto de fora do
+   olho pela bochecha, some e volta — devagar, sem drama. */
+function gotaDeLagrima(x, y, r, t) {
+  const ciclo = (quadro % 110) / 110;
+  if (ciclo > 0.7) return;
+  const q = ciclo / 0.7;
+  const yy = y + q * r * 0.55;
+  const c = COR.turbo;
+  ctx.globalAlpha = q < 0.8 ? 1 : (1 - q) / 0.2;
+  px(x, yy, c); px(x, yy + 1, c);
+  if (t >= 2) { px(x - 1, yy + 1, c); px(x + 1, yy + 1, c); px(x, yy + 2, c); }
+  ctx.globalAlpha = 1;
+}
+
+/* No turbo, risquinhos de vento correm para TRÁS do corpo: três trilhas
+   paralelas, cada uma num ponto do ciclo, saindo da borda e apagando. */
+function ventoTurbo(p, bx, by, r) {
+  const v = Math.hypot(p.vx, p.vy);
+  if (v < 0.05) return;
+  const dx = -p.vx / v, dy = -p.vy / v;          // para trás
+  const nx = -dy, ny = dx;                        // de lado
+  for (let k = 0; k < 3; k++) {
+    const f = (quadro * 0.07 + k * 0.37) % 1;
+    const lado = (k - 1) * r * 0.55;
+    const d0 = r + 2 + f * r * 0.9;
+    ctx.globalAlpha = 1 - f * 0.85;
+    const comp = 3 + Math.round(r * 0.3);
+    for (let j = 0; j < comp; j++)
+      px(bx + dx * (d0 + j) + nx * lado, by + dy * (d0 + j) + ny * lado,
+         j === 0 ? COR.turboPart[0] : COR.turbo);
+  }
+  ctx.globalAlpha = 1;
 }
 
 /* Um olho de estrela: dourado com sombra embaixo (igual à coroa), pulsando
@@ -5855,6 +6039,7 @@ function aplicarRetrato(m) {
       p.alvoX = d(v[0]); p.alvoY = d(v[1]); p.ang = v[2] / 100;
       p.espiral = v[11] / 100; p.turbo = v[12]; p.ima = v[13];
     }
+    if (v[4] < p.comidas) p.dor = CFG.CARA_DOR;
     p.nivel = v[3]; p.comidas = v[4]; p.progresso = v[5] / 100;
     p.boca = v[6]; p.pulso = v[7] / 100; p.atordoado = v[8];
     p.enjoo = v[9]; p.imune = v[10]; p.tiro = v[14]; p.dreno = v[15];
