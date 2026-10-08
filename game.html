@@ -211,9 +211,9 @@ const CFG = {
 
   /* vinheta desfocada */
   VINHETA: true,
-  VINHETA_CURVA: 1.6,    // quanto o desfoque demora a aparecer saindo do centro
-  VINHETA_FIM: 0.96,     // onde ele chega ao máximo (1 = borda da tela)
-  VINHETA_FORCA: 0.72,   // teto do desfoque na borda: 1 troca o pixel todo
+  VINHETA_CURVA: 1.15,    // quanto o desfoque demora a aparecer saindo do centro
+  VINHETA_FIM: 1.2,      // onde ele chega ao máximo (1 = borda da tela)
+  VINHETA_FORCA: 0.45,   // teto do desfoque na borda: 1 troca o pixel todo
 
   /* trombada entre os dois */
   COLISAO_ESTRELAS: 5,   // quantas estrelas o menor perde na trombada
@@ -1743,9 +1743,9 @@ const CORES_SKIN = [
 ];
 const ENFEITES = [
   { nome: "nada", custo: 0 }, { nome: "laco", custo: 100 },
-  { nome: "gatinho", custo: 350 }, { nome: "festa", custo: 700 },
-  { nome: "flor", custo: 1100 }, { nome: "antena", custo: 1700 },
-  { nome: "oculos", custo: 2500 }, { nome: "bruxa", custo: 3500 }
+  { nome: "cogumelo", custo: 350 }, { nome: "festa", custo: 700 },
+  { nome: "flor", custo: 1100 }, { nome: "fones", custo: 1700 },
+  { nome: "estrelas", custo: 2500 }, { nome: "bruxa", custo: 3500 }
 ];
 const liberado = item => salvo.total >= item.custo;
 const quantosLiberados = () => CORES_SKIN.filter(liberado).length + ENFEITES.filter(liberado).length;
@@ -5137,8 +5137,9 @@ function desenharNomes() {
 
 /* ── enfeites ────────────────────────────────────────────────
    Desenhos de várias cores ("a", "b", "c"...) ampliados por número inteiro
-   conforme o tamanho do corpo. Alguns vão ATRÁS do corpo (orelha, antena:
-   a base some atrás da cabeça), os outros na frente. */
+   conforme o tamanho do corpo. Alguns vão ATRÁS do corpo (o arco dos fones,
+   as estrelinhas do lado de lá da órbita), os outros na frente.
+   Nada pode tapar olho nem boca: a cara é o que comunica o jogador. */
 function carimboCores(mapa, cx, cy, cores, f) {
   const l = mapa[0].length * f, a = mapa.length * f;
   const x0 = Math.round(cx - l / 2), y0 = Math.round(cy - a / 2);
@@ -5153,6 +5154,35 @@ function carimboCores(mapa, cx, cy, cores, f) {
 const SPR_LACO = ["aaa...aaa", "acaa.aaca", "aaaabaaaa", "acaa.aaca", "aaa...aaa"];
 const SPR_FESTA = ["...c...", "..ccc..", "...a...", "..aba..", "..aaa..", ".abaaa.", ".aaaba.", "abaaaab", "aaaabaa"];
 const SPR_FLOR = [".aa.aa.", "aaaaaaa", ".aabaa.", "aaaaaaa", ".aa.aa."];
+const SPR_COGUMELO = ["...aaa...", ".aacaaaa.", "aaaaaacaa", "acaaaaaaa", ".ddddddd.", "...eee...", "...eee..."];
+const COR_COGUMELO = { a: "#ff6b7a", c: "#fff6f0", d: "#f6d2b8", e: "#fbe6d4" };
+const SPR_BRILHO = ["..a..", "..a..", "aabaa", "..a..", "..a.."];
+const SPR_BRILHO_P = [".a.", "aba", ".a."];
+const COR_BRILHO = { a: "#ffd85c", b: "#ffffff" };
+/* fones: o arco passa por cima da cabeça, as conchas cobrem só a lateral */
+function arcoFones(bx, by, rx, ry, esp, cor) {
+  ctx.fillStyle = cor;
+  for (let k = 0; k <= 40; k++) {
+    const a = Math.PI * (1.08 + 0.84 * k / 40);
+    ctx.fillRect(Math.round(bx + Math.cos(a) * rx - esp / 2), Math.round(by + Math.sin(a) * ry - esp / 2), Math.round(esp), Math.round(esp));
+  }
+}
+function conchaFone(cx, cy, w, h) {
+  oval(cx, cy, w + 1, h + 1, "#8a3d6e");
+  oval(cx, cy, w, h, "#ff8fc0");
+  oval(cx - w * 0.25, cy - h * 0.35, Math.max(0.6, w * 0.35), Math.max(0.6, h * 0.25), "#ffd0e6");
+}
+/* três brilhos girando na altura da testa; os do lado de lá passam atrás */
+function estrelasOrbita(bx, topo, r, f, atras) {
+  for (let k = 0; k < 3; k++) {
+    const a = quadro * 0.035 + k * Math.PI * 2 / 3;
+    const fundo = Math.sin(a) < 0;
+    if (fundo !== atras) continue;
+    const x = bx + Math.cos(a) * r * 1.05, y = topo + r * 0.18 + Math.sin(a) * r * 0.24;
+    const pisca = (quadro + k * 17) % 50 < 6;
+    carimboCores(fundo || pisca ? SPR_BRILHO_P : SPR_BRILHO, x, y, COR_BRILHO, Math.max(1, Math.round(f * 0.8)));
+  }
+}
 const SPR_BRUXA = ["......a....", ".....aa....", "....aaa....", "....aaaa...", "...aaaaa...",
                    "...abbba...", "..aaaaaaa..", "aaaaaaaaaaa"];
 /* triângulo cheio, sem antialias: testa cada pixel da caixa */
@@ -5174,42 +5204,23 @@ function desenharEnfeite(p, bx, by, r, ry, contorno, blush, atras) {
   const f = Math.max(1, Math.round(r / 16));
   const topo = by - ry;
   if (atras) {
-    if (nome === "gatinho") {
-      for (const l of [-1, 1]) {
-        const xb = bx + l * r * 0.55, xp = bx + l * r * 0.62;
-        triangulo(xb - r * 0.32, topo + r * 0.35, xb + r * 0.32, topo + r * 0.35, xp, topo - r * 0.42, contorno);
-        triangulo(xb - r * 0.22, topo + r * 0.35, xb + r * 0.22, topo + r * 0.35, xp, topo - r * 0.26, COR.corpo);
-        triangulo(xb - r * 0.11, topo + r * 0.3, xb + r * 0.11, topo + r * 0.3, xp, topo - r * 0.1, blush);
-      }
-    } else if (nome === "antena") {
-      for (const l of [-1, 1]) {
-        const x0 = bx + l * r * 0.3, y0 = topo + r * 0.2;
-        const x1 = bx + l * r * 0.6, y1 = topo - r * 0.5;
-        risco(x0, y0, x1, y1, contorno, f > 1);
-        disco(x1, y1, 1.6 * f + 0.4, "#9be15d");
-        px(x1 - f * 0.6, y1 - f * 0.6, "#e9ffd2");
-      }
-    }
+    if (nome === "fones") {
+      const esp = Math.max(2, f * 2);
+      arcoFones(bx, by, r + esp * 0.5 + 1, ry + esp * 0.5 + 1, esp + 2, "#8a3d6e");
+      arcoFones(bx, by, r + esp * 0.5 + 1, ry + esp * 0.5 + 1, esp, "#c9b6e8");
+    } else if (nome === "estrelas") estrelasOrbita(bx, topo, r, f, true);
     return;
   }
   if (nome === "laco") carimboCores(SPR_LACO, bx + r * 0.5, topo + r * 0.16, { a: "#ff6fa8", b: "#c2306e", c: "#ffc4dc" }, f);
   else if (nome === "festa") carimboCores(SPR_FESTA, bx + r * 0.22, topo - 4 * f + r * 0.08, { a: "#5ec8e8", b: "#ff7cc4", c: "#ffd85c" }, f);
   else if (nome === "flor") carimboCores(SPR_FLOR, bx - r * 0.58, topo + r * 0.24, { a: "#fff0f7", b: "#ffd85c" }, f);
   else if (nome === "bruxa") carimboCores(SPR_BRUXA, bx + r * 0.05, topo - 3 * f + r * 0.1, { a: "#3d2a5c", b: "#ffd85c" }, f);
-  else if (nome === "oculos") {
-    // segue o olhar, igual aos olhos que ele cobre
-    const sep = Math.max(3, r * 0.4), ox = p.olhoX || 0, oy = p.olhoY || 0;
-    const ly = by - r * 0.13 + oy, lw = Math.max(4, r * 0.46), lh = Math.max(3, r * 0.3);
-    ctx.fillStyle = "#1c1626";
-    for (const l of [-1, 1]) {
-      const cx = bx + l * sep + ox;
-      ctx.fillRect(Math.round(cx - lw / 2), Math.round(ly - lh / 2), Math.round(lw), Math.round(lh));
-      ctx.fillRect(Math.round(cx - lw / 2) + 1, Math.round(ly + lh / 2), Math.round(lw) - 2, 1);
-    }
-    ctx.fillRect(Math.round(bx - sep + ox + lw / 2), Math.round(ly - lh / 2), Math.round(2 * sep - lw), Math.max(1, f));
-    px(bx - sep + ox - lw / 2 + 1, ly - lh / 2 + 1, "#ffffff");
-    px(bx + sep + ox - lw / 2 + 1, ly - lh / 2 + 1, "#ffffff");
+  else if (nome === "cogumelo") carimboCores(SPR_COGUMELO, bx - r * 0.42, topo - 2 * f + r * 0.12, COR_COGUMELO, f);
+  else if (nome === "fones") {
+    const w = Math.max(2, r * 0.17), h = Math.max(3, r * 0.3);
+    for (const l of [-1, 1]) conchaFone(bx + l * (r - w * 0.3), by - ry * 0.12, w, h);
   }
+  else if (nome === "estrelas") estrelasOrbita(bx, topo, r, f, false);
 }
 
 const baldesAnel = new Map();
@@ -6518,10 +6529,9 @@ function desenharVisual() {
     else if (n === "festa") carimboCores(SPR_FESTA, x, y, { a: "#5ec8e8", b: "#ff7cc4", c: "#ffd85c" }, 1);
     else if (n === "flor") carimboCores(SPR_FLOR, x, y, { a: "#fff0f7", b: "#ffd85c" }, 1);
     else if (n === "bruxa") carimboCores(SPR_BRUXA, x, y, { a: "#3d2a5c", b: "#ffd85c" }, 1);
-    else if (n === "gatinho") { triangulo(x - 7, y + 3, x - 1, y + 3, x - 5, y - 5, COR.contorno); triangulo(x + 1, y + 3, x + 7, y + 3, x + 5, y - 5, COR.contorno);
-                                triangulo(x - 5, y + 2, x - 2, y + 2, x - 4, y - 2, COR.blush); triangulo(x + 2, y + 2, x + 5, y + 2, x + 4, y - 2, COR.blush); }
-    else if (n === "antena") { risco(x - 2, y + 5, x - 5, y - 3, COR.hudFraco); risco(x + 2, y + 5, x + 5, y - 3, COR.hudFraco); disco(x - 5, y - 4, 2, "#9be15d"); disco(x + 5, y - 4, 2, "#9be15d"); }
-    else if (n === "oculos") { ctx.fillStyle = "#1c1626"; ctx.fillRect(x - 8, y - 2, 6, 4); ctx.fillRect(x + 2, y - 2, 6, 4); ctx.fillRect(x - 2, y - 2, 4, 1); px(x - 7, y - 1, "#fff"); px(x + 3, y - 1, "#fff"); }
+    else if (n === "cogumelo") carimboCores(SPR_COGUMELO, x, y, COR_COGUMELO, 1);
+    else if (n === "fones") { arcoFones(x, y + 2, 5, 5, 3, "#8a3d6e"); arcoFones(x, y + 2, 5, 5, 1, "#c9b6e8"); conchaFone(x - 5, y + 2, 1.5, 2.5); conchaFone(x + 5, y + 2, 1.5, 2.5); }
+    else if (n === "estrelas") { carimboCores(SPR_BRILHO, x - 4, y + 2, COR_BRILHO, 1); carimboCores(SPR_BRILHO_P, x + 4, y - 3, COR_BRILHO, 1); carimboCores(SPR_BRILHO_P, x + 3, y + 4, COR_BRILHO, 1); }
   });
   if (visualMsg) textoCentro(cortarTexto(visualMsg, VL - 8), lv.msgY, COR.hud, 1);
   desenharBotaoSair();
