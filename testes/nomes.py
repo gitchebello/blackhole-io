@@ -32,17 +32,22 @@ def espera(pg, expr, seg=8):
     return False
 
 
-# ── proxy lento: so a descida (servidor -> jogador) e estrangulada ──
-BYTES_POR_SEG = 12000
+# ── proxy lento: so a descida (servidor -> jogador) do WebSocket e estrangulada ──
+# O lento abre a pagina INTEIRA pelo proxy. Desviar so o WebSocket para
+# 127.0.0.1 nao serve: o Chrome bloqueia pagina de IP publico falando com a
+# propria maquina (Private Network Access), e o teste pelo endereco publico
+# quebrava por isso, nao pelo jogo.
+BYTES_POR_SEG = int(__import__("os").environ.get("BH_LENTO", "12000"))
 
 
 def proxy_lento():
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", 0))
-    srv.listen(8)
+    srv.listen(16)
 
-    def bombear(de, para, lento):
+    def bombear(de, para, descida):
+        lento = False
         try:
             while True:
                 d = de.recv(1024 if lento else 65536)
@@ -51,6 +56,8 @@ def proxy_lento():
                 para.sendall(d)
                 if lento:
                     time.sleep(len(d) / BYTES_POR_SEG)
+                elif descida and b" 101 " in d[:20]:
+                    lento = True                 # virou WebSocket: agora estrangula
         except OSError:
             pass
         for s in (de, para):
@@ -71,18 +78,7 @@ def proxy_lento():
 
 
 porta_lenta = proxy_lento()
-
-# o WebSocket do lento vai pelo proxy; a pagina carrega direto
-DESVIO = """
-(() => {
-  const WS = window.WebSocket;
-  window.WebSocket = function (u, p) {
-    const x = new URL(u); x.host = "127.0.0.1:%d";
-    return new WS(x.href, p);
-  };
-  window.WebSocket.prototype = WS.prototype;
-})();
-""" % porta_lenta
+URL_LENTA = alvo._replace(netloc="127.0.0.1:%d" % porta_lenta).geturl()
 
 # carimbo de hora no retrato (anfitriao) e o atraso na chegada (convidados)
 CARIMBO = """() => {
@@ -102,11 +98,9 @@ with sync_playwright() as p:
     for nome, lento in (("A", False), ("B", False), ("C", True)):
         ctx = nav.new_context(viewport={"width": 420, "height": 820},
                               device_scale_factor=1)
-        if lento:
-            ctx.add_init_script(DESVIO)
         pg = ctx.new_page()
         pg.on("pageerror", lambda e, n=nome: erros.append(n + ": " + str(e)))
-        pg.goto(URL)
+        pg.goto(URL_LENTA if lento else URL)
         pg.evaluate("() => { localStorage.clear(); REDE.meuNome = ''; }")
         pg.wait_for_timeout(300)
         pags.append(pg)
@@ -182,7 +176,7 @@ with sync_playwright() as p:
     print("   B (internet boa):  mediana %4d ms  p95 %5d ms  (%d retratos)" % (mb, pb, nb))
     print("   C (internet lenta): mediana %4d ms  p95 %5d ms  (%d retratos)" % (mc, pc, nc))
     confere(pb < 150, "o lento nao atrasa o jogador de internet boa")
-    confere(pc < 3000, "o lento recebe mundo recente, nao uma fila de passado")
+    confere(pc < 800, "o lento recebe mundo recente, nao uma fila de passado")
 
     # plaquinhas: tira foto com os tres perto um do outro
     a.evaluate("""() => {
