@@ -269,11 +269,13 @@ const CFG = {
   ENGOLIR_LEVA: 0.6,     // quanto disso vai para quem comeu
   ENGOLIR_LEVA_LIDER: 0.35, // se quem comeu já é o líder: freio de bola de neve
   ENGOLIR_ANIM: 28,      // quadros sendo sugado para dentro (vítima do seu tamanho)
-  ENGOLIR_ANIM_MIN: 12,  // ... e para uma vítima miudinha: rápido e suave
+  ENGOLIR_ANIM_MIN: 20,  // ... e para uma vítima miudinha: mais rápido, mas com impacto
   /* O peso da engolida (0 a 1) sai da razão raio da vítima / raio de quem
-     come: até DRAMA_MIUDO é peso 0 (engolida óbvia, rápida, sem câmera
-     lenta); de DRAMA_PARECIDO para cima é peso 1 (o drama inteiro). Duração,
-     câmera lenta, congelamento, tarjas e estouro escalam com o peso. */
+     come: até DRAMA_MIUDO é peso 0 (engolida óbvia); de DRAMA_PARECIDO para
+     cima é peso 1 (o drama inteiro). Duração, câmera lenta, congelamento,
+     tarjas e estouro escalam com o peso, mas sempre há impacto: com peso 0
+     os efeitos ficam em DRAMA_PISO da força total (pedido do usuário: faixa
+     estreita entre a menor e a maior engolida). */
   DRAMA_MIUDO: 0.35,
   DRAMA_PARECIDO: 0.8,
   /* DRAMA DA ENGOLIDA: quando você come ou é comido, o tempo desacelera
@@ -281,8 +283,11 @@ const CFG = {
      linhas de foco, a câmera vai chegando perto; no "nhac" tudo congela um
      instante e explode. Lento e congelado só fora do online — lá o tempo é
      de todos. Aproximação, tarjas e linhas valem em todo lugar (só desenho). */
-  DRAMA_LENTO: 0.38,     // velocidade do tempo durante a engolida (peso 1)
-  DRAMA_PAUSA: 120,      // ms de congelamento no "nhac" (peso 1)
+  DRAMA_LENTO: 0.45,     // velocidade do tempo durante a engolida (peso 1)
+  DRAMA_LENTO_MIUDO: 0.7, // ... e com peso 0
+  DRAMA_PAUSA: 100,      // ms de congelamento no "nhac" (peso 1)
+  DRAMA_PAUSA_MIUDO: 50, // ... e com peso 0
+  DRAMA_PISO: 0.55,      // força mínima de tarjas, tremor, estouro (peso 0)
   DRAMA_SOCO: 0.16,      // quanto a câmera chega perto (0,16 = 16% de zoom)
   DRAMA_FAIXA: 0.075,    // altura de cada tarja, em fração da tela
   DIGESTAO: 480,         // barriga cheia: 8 s sem poder engolir outro rival
@@ -3098,7 +3103,7 @@ function passoEngolidos() {
         faiscar(g.x, g.y, 26, 2, 8);
       }
       if (g === buraco) {
-        const w = 0.35 + 0.65 * pesoEngolida(p);
+        const w = forcaDrama(pesoEngolida(p));
         SFX.nhac(); tremor = Math.max(tremor, 18 * w); aberr = Math.max(aberr, 14 * w);
         soltarCoracoes(g.x, g.y, Math.round(6 + 8 * w), 1.6, 1);
         vibrar([20, 30, 50]);
@@ -3152,6 +3157,8 @@ const pesoEngolida = v => {
   const tot = v.engolidoTotal || CFG.ENGOLIR_ANIM;
   return Math.max(0, Math.min(1, (tot - CFG.ENGOLIR_ANIM_MIN) / (CFG.ENGOLIR_ANIM - CFG.ENGOLIR_ANIM_MIN)));
 };
+/* força dos efeitos: nunca abaixo de DRAMA_PISO */
+const forcaDrama = peso => CFG.DRAMA_PISO + (1 - CFG.DRAMA_PISO) * peso;
 const corDe = p => (p === buraco ? paletaSkin() : paletaDe(p)).disco;
 function lento(ms, forca) {
   if (!tempoDrama()) return;
@@ -3170,15 +3177,15 @@ function comecarDrama(g, v) {
   const alvo = g || v, peso = pesoEngolida(v), dur = v.engolidoTotal || CFG.ENGOLIR_ANIM;
   drama = { g: g, v: v, t: 0, peso: peso, dur: dur };
   socoX = alvo.x; socoY = alvo.y;
-  // engolida óbvia de um miudinho: sem tarjas nem linhas, só a espiral
-  faixasAlvo = peso > 0.3 ? peso : 0;
-  if (peso > 0.3)
-    foco = { x: alvo.x, y: alvo.y, vida: dur + 30, total: dur + 30, cor: corDe(alvo)[1], fixo: alvo };
-  // câmera lenta: de nenhuma (peso 0) até DRAMA_LENTO (peso 1)
-  const forca = 1 - (1 - CFG.DRAMA_LENTO) * peso;
-  if (forca < 0.97) lento(dur * 1000 / 60 / forca, forca);
+  const w = forcaDrama(peso);
+  // miudinho: tarjas mais finas; do seu tamanho: tarjas cheias
+  faixasAlvo = w;
+  foco = { x: alvo.x, y: alvo.y, vida: dur + 30, total: dur + 30, cor: corDe(alvo)[1], fixo: alvo };
+  // câmera lenta: de DRAMA_LENTO_MIUDO (peso 0) até DRAMA_LENTO (peso 1)
+  const forca = CFG.DRAMA_LENTO_MIUDO + (CFG.DRAMA_LENTO - CFG.DRAMA_LENTO_MIUDO) * peso;
+  lento(dur * 1000 / 60 / forca, forca);
   // antecipação: a câmera recua um tiquinho antes de começar a chegar perto
-  socoV -= 0.03 * peso;
+  socoV -= 0.03 * w;
 }
 function passoDrama() {
   socoV = (socoV + (socoAlvo - soco) * 0.14) * 0.8;
@@ -3205,7 +3212,7 @@ function passoDrama() {
   const k = d.t / d.dur;
   const alvo = g || v;
   socoX = alvo.x; socoY = alvo.y;
-  socoAlvo = CFG.DRAMA_SOCO * 0.7 * Math.min(1, k * 1.3) * (0.25 + 0.75 * d.peso);
+  socoAlvo = CFG.DRAMA_SOCO * 0.7 * Math.min(1, k * 1.3) * forcaDrama(d.peso);
   // a vítima vai se desfazendo num fio de brilhos que entra na boca
   if (g) {
     const cores = corDe(v);
@@ -3222,8 +3229,8 @@ function passoDrama() {
 }
 /* o "nhac" de uma engolida de rival que envolve você */
 function nhacDrama(g, v) {
-  const peso = pesoEngolida(v), w = 0.3 + 0.7 * peso;
-  if (peso > 0.15) congelar(CFG.DRAMA_PAUSA * peso);
+  const peso = pesoEngolida(v), w = forcaDrama(peso);
+  congelar(CFG.DRAMA_PAUSA_MIUDO + (CFG.DRAMA_PAUSA - CFG.DRAMA_PAUSA_MIUDO) * peso);
   lentoAte = 0;
   socoX = g.x; socoY = g.y;
   socoV += 0.09 * w; socoAlvo = 0;
@@ -3231,10 +3238,10 @@ function nhacDrama(g, v) {
   tremor = Math.max(tremor, 26 * w); aberr = Math.max(aberr, 18 * w);
   clarear(corDe(g)[3], Math.round(16 * w));
   const r = raioDe(g), pal = corDe(v);
-  for (let k = 0; k < 1 + Math.round(2 * peso); k++)
+  for (let k = 0; k < 2 + Math.round(peso); k++)
     aneis.push({ x: g.x, y: g.y, r: r * (0.8 + k * 0.45), vida: 18 + k * 8, total: 18 + k * 8,
                  rival: true, pal: k === 1 ? corDe(g) : pal });
-  for (let n = 0; n < 12 + 22 * peso; n++) {
+  for (let n = 0; n < 34 * w; n++) {
     const a = Math.random() * Math.PI * 2, vel = (1.2 + Math.random() * 2.2) / zoom;
     const vida = 16 + Math.floor(Math.random() * 18);
     faiscas.push({ curva: (Math.random() - 0.5) * 0.16, x: g.x + Math.cos(a) * r, y: g.y + Math.sin(a) * r,
@@ -3242,7 +3249,7 @@ function nhacDrama(g, v) {
                    arrasto: 0.9, tipo: Math.random() < 0.4 ? "raio" : "brilho",
                    cor: (Math.random() < 0.5 ? pal : corDe(g))[1 + Math.floor(Math.random() * 4)] });
   }
-  if (peso > 0.3) foco = { x: g.x, y: g.y, vida: 26, total: 26, cor: corDe(g)[1], fixo: g };
+  foco = { x: g.x, y: g.y, vida: 26, total: 26, cor: corDe(g)[1], fixo: g };
 }
 
 /* Engolir lua, planeta ou sol: cada um com a sua festa, crescendo com o
