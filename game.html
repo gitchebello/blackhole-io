@@ -355,6 +355,7 @@ const CFG = {
      céu claro sempre foi a exceção simpática, não o ponto de partida. Quem
      preferir o claro troca no botão de sol do menu. */
   FUNDO_PB: true,         // só o cenário em preto e branco; o resto mantém a cor
+  DISCO_GLOW: 1,          // brilho sempre aceso do disco de acreção (0 desliga)
   SEMENTE: 20260823
 };
 
@@ -5335,6 +5336,20 @@ function desenharPersonagemDe(p, raio, paleta, halo, contorno, blush, comTurbo) 
   const giro = quadro * (comTurbo && turbo > 0 ? 0.09 : 0.04) * acel;
   const N = paleta.length;
   const iris = p.imune > 0 || (p === buraco && CORES_SKIN[salvo.cor] && CORES_SKIN[salvo.cor].iris);
+
+  /* Brilho de base do disco: um halo leve e por igual, 360 graus em volta,
+     aceso mesmo parado. Sem ponto quente nem lado mais forte — testei e
+     ficou ruim; é um glow geral. No fundo preto a luz é SOMADA (`lighter`),
+     que é o que faz parecer luz e não tinta; no branco fica por cima normal. */
+  const glow = CFG.DISCO_GLOW;
+  if (glow > 0) {
+    const escuro = CFG.FUNDO_PB;
+    if (escuro) ctx.globalCompositeOperation = "lighter";
+    const corBase = iris
+      ? COR.arcoiris[Math.floor(quadro * 0.06) % COR.arcoiris.length] : paleta[5];
+    brilho(bx, by, r, r + 6 + r * 0.4, corBase, 0.3 * glow * (escuro ? 1 : 0.6), 2);
+    ctx.globalCompositeOperation = "source-over";
+  }
 
   if (fervor > 0.04) {                     // halo que acende junto
     // cor saturada do próprio disco, e não o halo pálido: por cima de uma
