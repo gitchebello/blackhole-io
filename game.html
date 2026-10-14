@@ -247,8 +247,7 @@ const CFG = {
   ],
   CORPO_RAZAO: 1.15,     // quanto o seu raio precisa passar o do corpo
   COMBO_JANELA: 48,      // quadros para a próxima mordida ainda contar no combo
-  COMBO_BONUS: 10,       // a cada tantas, um bônus
-  COMBO_PREMIO: 2,       // de tantas estrelas
+  COMBO_BONUS: 10,       // a cada tantas, um bônus que cresce: x10 +1, x20 +2, x30 +3...
   CORPO_ANTES: 3,        // níveis de antecedência com que o degrau aparece
   CORPO_NASCE: 40,       // quadros da entrada (cresce do nada com repique)
   CORPO_ENGOLIR: 22,     // quadros caindo para dentro
@@ -2860,31 +2859,33 @@ function passoTrombadas() {
 }
 
 /* COMBO: cada mordida dentro da janela da anterior soma. É o que transforma
-   "comer estrela" em ritmo — e a cada COMBO_BONUS vem um prêmio pequeno. */
+   "comer estrela" em ritmo — e a cada COMBO_BONUS vem um prêmio que cresce
+   com a sequência: x10 dá +1, x20 dá +2, x30 dá +3, e assim por diante. */
 function contarCombo(p) {
   p.combo = (p.comboT > 0 ? p.combo || 0 : 0) + 1;
   p.comboT = CFG.COMBO_JANELA;
   if (p === buraco) { comboPop = 1; partida.combo = Math.max(partida.combo, p.combo); }
   if (p.combo % CFG.COMBO_BONUS === 0 && cena === "jogo") {
-    ganharEstrelas(p, CFG.COMBO_PREMIO);
+    const premio = p.combo / CFG.COMBO_BONUS;
+    ganharEstrelas(p, premio);
     if (p === buraco) {
-      anunciar("COMBO x" + p.combo + "! +" + CFG.COMBO_PREMIO, COR.hud, true);
+      anunciar("COMBO x" + p.combo + "! +" + premio, COR.hud, true);
       SFX.combo(p.combo); vibrar(18);
     }
   }
 }
 let comboPop = 0;
-/* o número do combo flutua sobre a cabeça, estufa a cada mordida e muda de
-   cor conforme sobe; some quando a janela fecha */
+/* o número do combo flutua sobre a cabeça e estufa a cada mordida: na cor do
+   jogador até o primeiro bônus, arco-íris dali em diante; some quando a janela fecha */
 function desenharCombo() {
   const p = buraco;
-  if (!(p.combo >= 3) || !(p.comboT > 0) || cena !== "jogo") return;
+  if (!(p.combo >= 1) || !(p.comboT > 0) || cena !== "jogo") return;
   const txt = "x" + p.combo;
-  const tam = comboPop > 0.5 || p.combo >= 20 ? 2 : 1;
+  const tam = comboPop > 0.5 || p.combo >= CFG.COMBO_BONUS ? 2 : 1;
   const x = Math.round(paraTelaX(p.x) - larguraTexto(txt, tam) / 2);
   const y = Math.round(paraTelaY(p.y) - raioTela - 16 - FONTE_H * (tam - 1) - comboPop * 4);
-  const cor = p.combo >= 20 ? COR.arcoiris[Math.floor(quadro / 4) % COR.arcoiris.length]
-            : p.combo >= 10 ? COR.disco[6] : COR.hud;
+  const cor = p.combo >= CFG.COMBO_BONUS ? COR.arcoiris[Math.floor(quadro / 4) % COR.arcoiris.length]
+            : corDe(p)[4];
   ctx.globalAlpha = Math.min(1, p.comboT / 14);
   texto(txt, x, y, cor, tam);
   ctx.globalAlpha = 1;
