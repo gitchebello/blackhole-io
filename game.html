@@ -2990,7 +2990,7 @@ function carimboConta(ch, cx, base, S, e, rot, face, alfa) {
 
 function novoDigito(ch, de) {
   // de: -1 despenca de cima, +1 sobe de baixo, 0 já nasce no lugar
-  return { ch: ch, y: de * 18, vy: de < 0 ? 0.5 : de > 0 ? -1 : 0,
+  return { ch: ch, y: de * 11, vy: de < 0 ? 0.3 : de > 0 ? -0.6 : 0,
            e: 0, ev: 0, chao: de >= 0 };
 }
 function montarConta(n, de) {
@@ -3029,7 +3029,7 @@ function mudarConta(novo) {
   for (let i = 0; i < b.length; i++) {
     const antigo = CONTA.digs[i];
     if (mesmoTam && antigo && a[i] === b[i]) {
-      antigo.vy = Math.min(antigo.vy, -1.6); antigo.chao = false;   // o pulinho
+      antigo.vy = Math.min(antigo.vy, -1); antigo.chao = false;   // o pulinho
       digs.push(antigo);
     } else digs.push(novoDigito(b[i], de));
   }
@@ -3037,10 +3037,10 @@ function mudarConta(novo) {
   CONTA.digs.forEach((d, i) => {
     if (digs.includes(d)) return;
     CONTA.cacos.push({ ch: d.ch, x: xs[i], y: CONTA.cy + d.y, S: S,
-                       vx: (Math.random() - 0.5) * 2.4 + (i ? -0.4 : 0.4),
-                       vy: desce ? -2.2 - Math.random() : -3.4, g: desce ? 0.32 : 0.12,
-                       rot: 0, vr: (Math.random() < 0.5 ? -1 : 1) * (0.08 + Math.random() * 0.1),
-                       vida: 40, total: 40 });
+                       vx: (Math.random() - 0.5) * 1.3 + (i ? -0.25 : 0.25),
+                       vy: desce ? -1.3 - Math.random() * 0.5 : -2, g: desce ? 0.2 : 0.08,
+                       rot: 0, vr: (Math.random() < 0.5 ? -1 : 1) * (0.04 + Math.random() * 0.05),
+                       vida: 30, total: 30 });
   });
   CONTA.digs = digs;
   CONTA.n = novo;
@@ -3070,21 +3070,21 @@ function passoContagem() {
   for (const d of C.digs) {
     if (d.y < 0 || !d.chao) {
       // no ar: cai com gravidade e estica na direção do movimento
-      d.vy += 0.7; d.y += d.vy;
-      d.e = -Math.min(0.32, Math.abs(d.vy) * 0.045);
+      d.vy += 0.45; d.y += d.vy;
+      d.e = -Math.min(0.18, Math.abs(d.vy) * 0.035);
       if (d.y >= 0 && d.vy > 0) {
         d.y = 0;
         // bate no chão: achata na proporção da velocidade e quica um pouco
-        d.ev = 0; d.e = Math.min(0.42, d.vy * 0.055);
-        if (d.vy > 3) { d.vy = -d.vy * 0.28; } else { d.vy = 0; d.chao = true; }
+        d.ev = 0; d.e = Math.min(0.24, d.vy * 0.045);
+        if (d.vy > 3) { d.vy = -d.vy * 0.2; } else { d.vy = 0; d.chao = true; }
       }
     } else if (d.y > 0) {
       // subindo de baixo: mola que passa um pouco do lugar
       d.vy = (d.vy - d.y * 0.22) * 0.74; d.y += d.vy;
-      d.e = -Math.min(0.25, Math.abs(d.vy) * 0.05);
+      d.e = -Math.min(0.15, Math.abs(d.vy) * 0.04);
       if (Math.abs(d.y) < 0.3 && Math.abs(d.vy) < 0.3) { d.y = 0; d.vy = 0; }
     } else {
-      d.ev = (d.ev - d.e * 0.34) * 0.72; d.e += d.ev;   // o achatado volta
+      d.ev = (d.ev - d.e * 0.3) * 0.66; d.e += d.ev;   // o achatado volta
       if (Math.abs(d.e) < 0.004 && Math.abs(d.ev) < 0.004) d.e = d.ev = 0;
     }
   }
@@ -3186,7 +3186,7 @@ function desenharContagem(yDoca) {
         soltarBrilhos(cx, cy - (FONTE_H - 1) * S0 * mult / 2, 2, 0.5, [pal[4], pal[2]]);
       if (t >= 1) {
         C.fase = "doca"; C.t = 0;
-        for (const d of C.digs) { d.chao = true; d.e = 0.38; d.ev = 0; }  // pousa
+        for (const d of C.digs) { d.chao = true; d.e = 0.22; d.ev = 0; }  // pousa
       }
     }
   } else if (C.fase === "saindo") {
