@@ -248,6 +248,11 @@ const CFG = {
   CORPO_RAZAO: 1.15,     // quanto o seu raio precisa passar o do corpo
   COMBO_JANELA: 48,      // quadros para a próxima mordida ainda contar no combo
   COMBO_BONUS: 10,       // a cada tantas, um bônus que cresce: x10 +1, x20 +2, x30 +3...
+
+  /* a reta final: quando falta isso para o líder bater a META, um número
+     grande na cor do jogador conta até zero, logo abaixo do X */
+  CONTA_DE: 50,
+  CONTA_TENSA: 10,       // daqui para baixo o número cresce e o coração dispara
   CORPO_ANTES: 3,        // níveis de antecedência com que o degrau aparece
   CORPO_NASCE: 40,       // quadros da entrada (cresce do nada com repique)
   CORPO_ENGOLIR: 22,     // quadros caindo para dentro
@@ -1887,6 +1892,7 @@ let raioTelaBase = CFG.RAIO_BASE;
 let expansao = 0;       // 1 no instante do nível novo, decai até 0
 let historico = [];     // { t: segundos, v: [estrelas de cada um] }
 let quadroInicio = 0;   // `quadro` nunca zera; o tempo da partida sai da diferença
+const CONTA = {};       // a contagem da reta final (ver desenharContagem)
 let primeiro = null;    // quem está com mais estrelas; ganha a coroa
 /* Quanto o inimigo já tirou de você, por origem. O dreno e o gelo tiram de
    pouco em pouco — anunciar cada estrela viraria um piscar sem sentido —,
@@ -2079,6 +2085,7 @@ function reiniciar() {
   arco = 0; turbo = 0; esperaColisao = 0; expansao = 0;
   historico = []; quadroInicio = quadro;
   primeiro = null; coroaAnim = 0;
+  zerarContagem();
   perdaAcum = { dreno: 0, gelo: 0 };
   perdaParada = { dreno: 0, gelo: 0 }; ganhoParado = 0;
   ganhoDreno = 0;
@@ -2357,6 +2364,22 @@ const SFX = {
     tom(420, 150, 0.26, "square", 0.2);
   },
   clique() { tom(720, 900, 0.05, "square", 0.16); },
+  /* a reta final abrindo: um "vuuup" subindo e um sino duplo em cima */
+  reta() {
+    tom(220, 880, 0.3, "triangle", 0.2);
+    chiado(0.28, 0.16, 3200);
+    tom(1047, 1047, 0.18, "triangle", 0.18, 0.28);
+    tom(1568, 1568, 0.3, "sine", 0.14, 0.34);
+  },
+  /* cada estrela a menos: um tique. Na tensão vira tic-tac, mais agudo
+     quanto mais perto do zero */
+  tique(n, tenso) {
+    if (!podeTocar("tique", tenso ? 60 : 90)) return;
+    if (!tenso) { tom(1300, 1450, 0.035, "square", 0.05); return; }
+    const f = 660 * Math.pow(1.07, CFG.CONTA_TENSA - n);
+    tom(n % 2 ? f : f * 0.75, (n % 2 ? f : f * 0.75) * 1.02, 0.09, "triangle", 0.2);
+    if (n <= 3) tom(f * 2, f * 2, 0.12, "sine", 0.1, 0.02);
+  },
   fim(ganhou) {
     const notas = ganhou ? [523, 659, 784, 1047] : [523, 466, 392, 311];
     notas.forEach((f, i) => tom(f, f, 0.22, "triangle", 0.22, i * 0.13));
@@ -2888,6 +2911,363 @@ function desenharCombo() {
             : corDe(p)[4];
   ctx.globalAlpha = Math.min(1, p.comboT / 14);
   texto(txt, x, y, cor, tam);
+  ctx.globalAlpha = 1;
+}
+
+/* ── A RETA FINAL ─────────────────────────────────────────────────
+   Quando falta CONTA_DE estrelas para o líder bater a META, um número grande
+   na cor do jogador entra na tela e conta até zero. É o relógio que a música
+   já tocava (o andamento sobe na reta final) e que ninguém via.
+   Cada dígito é um bonequinho com física própria, como num placar de
+   odômetro: o que mudou CAI da tela girando e o novo despenca de cima,
+   achata ao bater no chão e volta (squash & stretch); o que não mudou dá um
+   pulinho de simpatia. Subir (o líder perdeu estrelas) faz o contrário: o
+   novo sobe de baixo e o velho voa para cima.
+   Abaixo de CONTA_TENSA o número cresce, bate como um coração cada vez mais
+   rápido e solta uma onda a cada estrela; nos três últimos, arco-íris.
+   Desenhado por sprites de 1 px por ponto da fonte, ampliados sem
+   suavização: o squash fica fracionário só enquanto mexe, e parado o
+   número cai exato na grade do pixel art. */
+const spritesConta = new Map();
+function zerarContagem() {
+  CONTA.fase = "fora";           // fora | chegada | doca | saindo
+  CONTA.t = 0;
+  CONTA.n = null;                // o número que está na tela
+  CONTA.digs = [];               // da direita para a esquerda
+  CONTA.cacos = []; CONTA.brilhos = []; CONTA.ondas = [];
+  CONTA.esc = 3; CONTA.escV = 0; // pixels de tela por ponto da fonte
+  CONTA.batida = 0; CONTA.fase2 = 0;
+  CONTA.q = quadro;
+  CONTA.jaVeio = false;
+  CONTA.cx = VL / 2; CONTA.cy = 0; CONTA.S = 0;
+}
+
+/* cada dígito pintado uma vez por cor, 1 px por ponto da fonte */
+function spriteConta(ch, cor) {
+  const k = ch + cor;
+  let c = spritesConta.get(k);
+  if (c) return c;
+  const g = glifo(ch);
+  c = document.createElement("canvas");
+  c.width = g.larg; c.height = FONTE_H - 1;
+  const x = c.getContext("2d");
+  x.fillStyle = cor;
+  for (let ly = 0; ly < FONTE_H - 1; ly++)
+    for (let lx = 0; lx < g.larg; lx++) {
+      if (g.linhas[ly][g.c0 + lx] === "#") x.fillRect(lx, ly, 1, 1);
+    }
+  if (spritesConta.size > 400) spritesConta.clear();
+  spritesConta.set(k, c);
+  return c;
+}
+const largDigito = ch => glifo(ch).larg;
+
+/* Um dígito com os pés em (cx, base): o squash cresce para os lados e
+   encolhe para cima a partir do chão, como algo que pousou de verdade */
+function carimboConta(ch, cx, base, S, e, rot, face, alfa) {
+  const pal = corDe(buraco);
+  const sx = S * (1 + e), sy = S * (1 - e);
+  const w = largDigito(ch) * sx, h = (FONTE_H - 1) * sy;
+  const sombra = Math.max(1, Math.round(S * 0.6));
+  ctx.save();
+  ctx.globalAlpha = alfa == null ? 1 : alfa;
+  const exato = !rot && Math.abs(e) < 0.004;
+  ctx.translate(exato ? Math.round(cx - w / 2) + w / 2 : cx, exato ? Math.round(base) : base);
+  if (rot) ctx.rotate(rot);
+  const x0 = -w / 2, y0 = -h;
+  const borda = spriteConta(ch, COR.vazio);
+  for (let dx = -1; dx <= 1; dx++)                // contorno de 1 px em volta
+    for (let dy = -1; dy <= 1; dy++) {            // do número e da sombra
+      ctx.drawImage(borda, x0 + dx, y0 + dy, w, h);
+      ctx.drawImage(borda, x0 + dx, y0 + dy + sombra, w, h);
+    }
+  ctx.drawImage(spriteConta(ch, pal[7]), x0, y0 + sombra, w, h);
+  // o friso claro: a mesma forma, clara, 1 px acima da face
+  ctx.drawImage(spriteConta(ch, pal[2]), x0, y0, w, h);
+  ctx.drawImage(spriteConta(ch, face), x0, y0 + 1, w, h);
+  ctx.restore();
+}
+
+function novoDigito(ch, de) {
+  // de: -1 despenca de cima, +1 sobe de baixo, 0 já nasce no lugar
+  return { ch: ch, y: de * 18, vy: de < 0 ? 0.5 : de > 0 ? -1 : 0,
+           e: 0, ev: 0, chao: de >= 0 };
+}
+function montarConta(n, de) {
+  CONTA.n = n;
+  CONTA.digs = ("" + n).split("").reverse().map(ch => novoDigito(ch, de));
+}
+function escalaConta(n) { return n <= 3 ? 5 : n <= 9 ? 4 : 3; }
+
+/* x do centro de cada dígito (lista da direita para a esquerda) */
+function posicoesConta(S, cx) {
+  const ds = CONTA.digs;
+  let total = 0;
+  for (const d of ds) total += largDigito(d.ch) * S;
+  total += (ds.length - 1) * S;
+  let x = cx + total / 2;
+  return ds.map(d => { const w = largDigito(d.ch) * S; x -= w; const c = x + w / 2; x -= S; return c; });
+}
+
+function soltarBrilhos(x, y, n, forca, cores) {
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * Math.PI * 2, v = (0.6 + Math.random() * 1.4) * forca;
+    const vida = 18 + Math.floor(Math.random() * 16);
+    CONTA.brilhos.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 0.4,
+                         vida: vida, total: vida, cor: cores[k % cores.length] });
+  }
+}
+
+function mudarConta(novo) {
+  // a escala do quadro passado, com estufada e tudo: o caco sai de onde estava
+  const velho = CONTA.n, S = CONTA.S || CONTA.esc;
+  const desce = novo < velho, de = desce ? -1 : 1;
+  const xs = posicoesConta(S, CONTA.cx);
+  const a = ("" + velho).split("").reverse(), b = ("" + novo).split("").reverse();
+  const mesmoTam = a.length === b.length;
+  const digs = [];
+  for (let i = 0; i < b.length; i++) {
+    const antigo = CONTA.digs[i];
+    if (mesmoTam && antigo && a[i] === b[i]) {
+      antigo.vy = Math.min(antigo.vy, -1.6); antigo.chao = false;   // o pulinho
+      digs.push(antigo);
+    } else digs.push(novoDigito(b[i], de));
+  }
+  // o que saiu vira caco: cai girando (ou voa para cima, se o número subiu)
+  CONTA.digs.forEach((d, i) => {
+    if (digs.includes(d)) return;
+    CONTA.cacos.push({ ch: d.ch, x: xs[i], y: CONTA.cy + d.y, S: S,
+                       vx: (Math.random() - 0.5) * 2.4 + (i ? -0.4 : 0.4),
+                       vy: desce ? -2.2 - Math.random() : -3.4, g: desce ? 0.32 : 0.12,
+                       rot: 0, vr: (Math.random() < 0.5 ? -1 : 1) * (0.08 + Math.random() * 0.1),
+                       vida: 40, total: 40 });
+  });
+  CONTA.digs = digs;
+  CONTA.n = novo;
+
+  const tenso = novo <= CFG.CONTA_TENSA;
+  const pal = corDe(buraco);
+  const meio = CONTA.cy - (FONTE_H - 1) * S / 2;
+  soltarBrilhos(CONTA.cx, meio, tenso ? 10 : 5, tenso ? 1.6 : 1, [pal[4], pal[2], COR.hud]);
+  if (tenso && desce) {
+    CONTA.batida = 1;
+    CONTA.ondas.push({ x: CONTA.cx, y: meio, r: 6, vida: 26, total: 26, cor: pal[4] });
+    if (novo <= 3) { CONTA.ondas.push({ x: CONTA.cx, y: meio, r: 2, vida: 34, total: 34, cor: pal[2] }); vibrar(25); }
+  }
+  if (desce) SFX.tique(novo, tenso);
+}
+
+function passoContagem() {
+  const C = CONTA;
+  C.t++;
+  // a escala vai para o alvo com mola: o número "estufa" ao entrar na tensão
+  const alvo = C.n == null ? 3 : escalaConta(C.n);
+  C.escV = (C.escV + (alvo - C.esc) * 0.16) * 0.7;
+  C.esc += C.escV;
+  if (Math.abs(alvo - C.esc) < 0.02 && Math.abs(C.escV) < 0.02) { C.esc = alvo; C.escV = 0; }
+  C.batida *= 0.88;
+
+  for (const d of C.digs) {
+    if (d.y < 0 || !d.chao) {
+      // no ar: cai com gravidade e estica na direção do movimento
+      d.vy += 0.7; d.y += d.vy;
+      d.e = -Math.min(0.32, Math.abs(d.vy) * 0.045);
+      if (d.y >= 0 && d.vy > 0) {
+        d.y = 0;
+        // bate no chão: achata na proporção da velocidade e quica um pouco
+        d.ev = 0; d.e = Math.min(0.42, d.vy * 0.055);
+        if (d.vy > 3) { d.vy = -d.vy * 0.28; } else { d.vy = 0; d.chao = true; }
+      }
+    } else if (d.y > 0) {
+      // subindo de baixo: mola que passa um pouco do lugar
+      d.vy = (d.vy - d.y * 0.22) * 0.74; d.y += d.vy;
+      d.e = -Math.min(0.25, Math.abs(d.vy) * 0.05);
+      if (Math.abs(d.y) < 0.3 && Math.abs(d.vy) < 0.3) { d.y = 0; d.vy = 0; }
+    } else {
+      d.ev = (d.ev - d.e * 0.34) * 0.72; d.e += d.ev;   // o achatado volta
+      if (Math.abs(d.e) < 0.004 && Math.abs(d.ev) < 0.004) d.e = d.ev = 0;
+    }
+  }
+  for (let i = C.cacos.length - 1; i >= 0; i--) {
+    const c = C.cacos[i];
+    c.vy += c.g; c.x += c.vx; c.y += c.vy; c.rot += c.vr;
+    if (--c.vida <= 0) C.cacos.splice(i, 1);
+  }
+  for (let i = C.brilhos.length - 1; i >= 0; i--) {
+    const b = C.brilhos[i];
+    b.x += b.vx; b.y += b.vy; b.vx *= 0.9; b.vy = b.vy * 0.9 + 0.03;
+    if (--b.vida <= 0) C.brilhos.splice(i, 1);
+  }
+  for (let i = C.ondas.length - 1; i >= 0; i--) {
+    const o = C.ondas[i];
+    o.r += 1.6 * (o.vida / o.total) + 0.3;
+    if (--o.vida <= 0) C.ondas.splice(i, 1);
+  }
+}
+
+const sobeEDesce = t => t * t * (3 - 2 * t);
+const voltaAlem = t => { const s = 2.2; t -= 1; return t * t * ((s + 1) * t + s) + 1; };
+
+function desenharContagem(yDoca) {
+  const C = CONTA;
+  if (cena !== "jogo") return;
+  let maior = 0;
+  for (const p of todos()) maior = Math.max(maior, p.comidas);
+  const resta = Math.max(0, CFG.META - maior);
+  const dentro = resta <= CFG.CONTA_DE;
+
+  // a primeira vez é um evento: o número estoura no meio da tela, fica um
+  // instante e voa para o lugar dele. Se voltar depois, só pipoca no lugar
+  if (dentro && (C.fase === "fora" || C.fase === "saindo")) {
+    C.t = 0; C.cacos = [];
+    C.esc = escalaConta(resta); C.escV = 0;
+    montarConta(resta, C.jaVeio ? -1 : 0);
+    if (!C.jaVeio) {
+      C.fase = "chegada"; C.jaVeio = true;
+      SFX.reta(); vibrar([20, 40, 30]);
+      tremor = Math.max(tremor, 8);
+    } else C.fase = "doca";
+  } else if (!dentro && (C.fase === "doca" || C.fase === "chegada")) {
+    C.fase = "saindo"; C.t = 0;
+  } else if (dentro && resta !== C.n) mudarConta(resta);
+
+  const passos = limitar(quadro - C.q, 0, 5);
+  C.q = quadro;
+  for (let k = 0; k < passos; k++) passoContagem();
+  if (C.fase === "fora" && !C.cacos.length && !C.brilhos.length) return;
+
+  const pal = corDe(buraco);
+  const S0 = C.esc;
+  const altDoca = (FONTE_H - 1) * escalaConta(C.n == null ? 50 : C.n);
+  const dx = VL / 2, dy = yDoca + altDoca;          // pés do número na doca
+  let cx = dx, cy = dy, mult = 1, alfa = 1, rotulo = 1;
+
+  if (C.fase === "chegada") {
+    const POP = 14, FICA = 46, VOO = 24;
+    // no alto da tela: o meio é onde você está, e o número não pode tapar o boneco
+    const mx = VL / 2, my = Math.round(VA * 0.24);
+    if (C.t < POP) {
+      mult = 2.4 * voltaAlem(C.t / POP);
+      cx = mx; cy = my; rotulo = 0;
+    } else if (C.t < POP + FICA) {
+      // fica pulsando no centro, girando brilhos em volta
+      const u = C.t - POP;
+      mult = 2.4 * (1 + Math.sin(u * 0.35) * 0.05 * (1 - u / FICA));
+      cx = mx; cy = my; rotulo = 0;
+      if (u === 1) {
+        const meio = my - (FONTE_H - 1) * S0 * mult / 2;
+        soltarBrilhos(mx, meio, 22, 2.6, [pal[4], pal[2], pal[5], COR.hud]);
+        C.ondas.push({ x: mx, y: meio, r: 10, vida: 30, total: 30, cor: pal[4] });
+        C.ondas.push({ x: mx, y: meio, r: 4, vida: 38, total: 38, cor: pal[2] });
+      }
+      if (u % 3 === 0) {
+        const a = u * 0.5, R = 34;
+        const meio = my - (FONTE_H - 1) * S0 * mult / 2;
+        soltarBrilhos(mx + Math.cos(a) * R, meio + Math.sin(a) * R * 0.6, 1, 0.3, [pal[2]]);
+      }
+      // a legenda do evento, letra a letra em arco-íris
+      const leg = "reta final!";
+      const ly = Math.round(my + 8 + Math.sin(u * 0.2) * 1.5);
+      const lx = Math.round((VL - larguraTexto(leg, 2)) / 2);
+      ctx.globalAlpha = Math.min(1, u / 5) * (u > FICA - 6 ? (FICA - u) / 6 : 1);
+      for (let ox = -1; ox <= 1; ox++)
+        for (let oy = -1; oy <= 1; oy++)
+          if (ox || oy) desenhaGlifos(leg, lx + ox * 2, ly + oy * 2, COR.vazio, 2);
+      glifosIris(leg, lx, ly, 2, Math.floor(quadro * 0.3));
+      ctx.globalAlpha = 1;
+    } else {
+      // o voo: devagar, rápido, devagar, num arco para cima e encolhendo
+      const t = Math.min(1, (C.t - POP - FICA) / VOO), e = sobeEDesce(t);
+      cx = mx + (dx - mx) * e;
+      cy = my + (dy - my) * e - Math.sin(t * Math.PI) * 16;
+      mult = 2.4 + (1 - 2.4) * e;
+      rotulo = e;
+      if (C.t % 2 === 0)
+        soltarBrilhos(cx, cy - (FONTE_H - 1) * S0 * mult / 2, 2, 0.5, [pal[4], pal[2]]);
+      if (t >= 1) {
+        C.fase = "doca"; C.t = 0;
+        for (const d of C.digs) { d.chao = true; d.e = 0.38; d.ev = 0; }  // pousa
+      }
+    }
+  } else if (C.fase === "saindo") {
+    const t = Math.min(1, C.t / 18);
+    mult = 1 + Math.sin(t * Math.PI) * 0.3 - t * t;
+    alfa = 1 - t; rotulo = 1 - t;
+    if (t >= 1) { C.fase = "fora"; C.n = null; C.digs = []; }
+  }
+
+  const tenso = C.n != null && C.n <= CFG.CONTA_TENSA;
+  if (C.fase === "doca") {
+    // flutua de leve; na tensão, bate como um coração cada vez mais rápido
+    cy += Math.round(Math.sin(quadro * 0.07) * 1.2);
+    if (tenso) {
+      const periodo = 14 + C.n * 2.6;
+      C.fase2 += 1 / periodo * passos;
+      const f = C.fase2 % 1;
+      const pulso = Math.exp(-f * 9) + 0.5 * Math.exp(-Math.max(0, f - 0.18) * 11) * (f > 0.18 ? 1 : 0);
+      mult *= 1 + 0.07 * pulso + 0.14 * C.batida;
+      if (C.n <= 3) { cx += Math.round((Math.random() - 0.5) * 2); cy += Math.round((Math.random() - 0.5) * 2); }
+    }
+  }
+  const S = S0 * mult;
+  C.cx = cx; C.cy = cy; C.S = S;
+
+  // halo atrás, só na tensão
+  if (tenso && C.digs.length && C.fase === "doca") {
+    const meio = cy - (FONTE_H - 1) * S / 2;
+    ctx.save();
+    if (CFG.FUNDO_PB) ctx.globalCompositeOperation = "lighter";
+    brilho(cx, meio, 4, 16 + S * 4 + C.batida * 10, pal[4], 0.22 + C.batida * 0.3, 1.6);
+    ctx.restore();
+  }
+
+  for (const o of C.ondas) {
+    ctx.globalAlpha = o.vida / o.total;
+    ctx.fillStyle = o.cor;
+    const passo = 1 / Math.max(4, o.r);
+    for (let a = 0; a < Math.PI * 2; a += passo)
+      ctx.fillRect(Math.round(o.x + Math.cos(a) * o.r), Math.round(o.y + Math.sin(a) * o.r * 0.8), 1, 1);
+  }
+  ctx.globalAlpha = 1;
+
+  for (const c of C.cacos)
+    carimboConta(c.ch, c.x, c.y, c.S, 0, c.rot, pal[4], Math.min(1, c.vida / 14));
+
+  if (C.digs.length) {
+    const xs = posicoesConta(S, cx);
+    C.digs.forEach((d, i) => {
+      // os três últimos em arco-íris, cada dígito numa cor correndo
+      const face = C.n != null && C.n <= 3 ? corIris(0.25, i)
+                 : tenso && C.batida > 0.55 ? pal[2] : pal[4];
+      carimboConta(d.ch, xs[i], cy + d.y * mult, S, d.e, 0, face, alfa);
+    });
+
+    // a legenda embaixo: quem lidera muda a frase
+    if (rotulo > 0.02) {
+      const meu = primeiro === buraco;
+      const leg = meu ? "pra voce vencer!" : "estrelas pro fim";
+      const ly = Math.round(cy + Math.max(2, S * 0.6) + 4), lw = larguraTexto(leg, 1);
+      // em tela estreita a legenda encostava no placar da direita: desvia
+      let lx = Math.round(cx - lw / 2);
+      const teto = VL - 4 - PLACAR_L - 6;
+      if (dy + 16 < alturaPlacar() + 4 && lx + lw > teto) lx = teto - lw;
+      ctx.globalAlpha = rotulo * alfa;
+      texto(leg, lx, ly, meu ? pal[4] : COR.hudFraco, 1);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  for (const b of C.brilhos) {
+    const v = b.vida / b.total, braco = v > 0.6 ? 2 : v > 0.25 ? 1 : 0;
+    ctx.globalAlpha = Math.min(1, v * 1.6);
+    ctx.fillStyle = b.cor;
+    const x = Math.round(b.x), y = Math.round(b.y);
+    ctx.fillRect(x, y, 1, 1);
+    if (braco) {
+      ctx.fillRect(x - braco, y, braco, 1); ctx.fillRect(x + 1, y, braco, 1);
+      ctx.fillRect(x, y - braco, 1, braco); ctx.fillRect(x, y + 1, 1, braco);
+    }
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -6722,6 +7102,7 @@ function desenharHUD() {
         ? buraco.progresso / custoDoNivel(buraco.nivel) : 1, COR.disco[4]);
 
   desenharPlacarVivo();
+  desenharContagem(brawl > 0 ? 30 : 20);
   desenharCombo();
 
   // sobe um pouco: pegar a cadente dá 10 estrelas e quase sempre sobe de
