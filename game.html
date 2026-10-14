@@ -251,7 +251,7 @@ const CFG = {
 
   /* a reta final: quando falta isso para o líder bater a META, um número
      grande na cor do jogador conta até zero, logo abaixo do X */
-  CONTA_DE: 50,
+  CONTA_DE: 100,         // era 50: passava rápido demais
   CONTA_TENSA: 10,       // daqui para baixo o número cresce e o coração dispara
   CORPO_ANTES: 3,        // níveis de antecedência com que o degrau aparece
   CORPO_NASCE: 40,       // quadros da entrada (cresce do nada com repique)
@@ -3129,7 +3129,10 @@ function desenharContagem(yDoca) {
     } else C.fase = "doca";
   } else if (!dentro && (C.fase === "doca" || C.fase === "chegada")) {
     C.fase = "saindo"; C.t = 0;
-  } else if (dentro && resta !== C.n) mudarConta(resta);
+  } else if (dentro && resta !== C.n && C.fase === "doca" && C.t > 12) mudarConta(resta);
+  // durante a chegada o número fica parado no 50: estourar, voar e ainda
+  // trocar dígitos ao mesmo tempo era confuso. Só depois de pousar e
+  // assentar (12 quadros) ele alcança a conta de verdade
 
   const passos = limitar(quadro - C.q, 0, 5);
   C.q = quadro;
@@ -3138,8 +3141,16 @@ function desenharContagem(yDoca) {
 
   const pal = corDe(buraco);
   const S0 = C.esc;
-  const altDoca = (FONTE_H - 1) * escalaConta(C.n == null ? 50 : C.n);
-  const dx = VL / 2, dy = yDoca + altDoca;          // pés do número na doca
+  const altDoca = (FONTE_H - 1) * escalaConta(C.n == null ? CFG.CONTA_DE : C.n);
+  let dx = VL / 2;
+  const dy = yDoca + altDoca;                       // pés do número na doca
+  // o "100" de três dígitos encostava no placar em tela estreita: desvia
+  if (C.digs.length) {
+    const Sd = escalaConta(C.n), teto = VL - 4 - PLACAR_L - 6;
+    let larg = (C.digs.length - 1) * Sd;
+    for (const d of C.digs) larg += largDigito(d.ch) * Sd;
+    if (dx + larg / 2 > teto) dx = teto - larg / 2;
+  }
   let cx = dx, cy = dy, mult = 1, alfa = 1, rotulo = 1;
 
   if (C.fase === "chegada") {
