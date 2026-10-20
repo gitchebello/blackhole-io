@@ -1,1 +1,9 @@
 serve.log
+node_modules/
+__pycache__/
+venv/
+.venv/
+*.log
+*.pid
+.claude/
+game.v*.html
